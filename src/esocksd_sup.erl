@@ -9,8 +9,8 @@
 
 -export([start_link/0]).
 -export([init/1]).
--export([start_socket/1]).
--export([empty_listeners/1]).
+-export([start_socket/0]).
+-export([empty_listeners/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -24,24 +24,23 @@ init([]) ->
     {ok, Listen} = gen_tcp:listen(9999, [binary, inet, {active, once}]),
 
     % create 5 worker processes (restart = temporary, so a child process is never restarted)
-    Pid = self(),
-    spawn_link(?MODULE, empty_listeners, [Pid]),
+    spawn_link(?MODULE, empty_listeners, []),
 
     SupFlags = #{strategy => simple_one_for_one, intensity => 1, period => 5},
-    ChildSpecs = [#{ id => worker, start => {socks_worker, start_link, [Listen, self()]}, restart => temporary }],
+    ChildSpecs = [#{ id => worker, start => {socks_worker, start_link, [Listen]}, restart => temporary }],
 
     io:format("Listening for SOCKS connections~n", []),
 
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions
-start_socket(Pid) ->
-    supervisor:start_child(Pid, []).
+start_socket() ->
+    supervisor:start_child(?SERVER, []).
 
 %% Start with 5 listeners so that many multiple connections can
 %% be started at once, without serialization. In best circumstances,
 %% a process would keep the count active at all times to insure nothing
 %% bad happens over time when processes get killed too much.
-empty_listeners(Pid) ->
-    [start_socket(Pid) || _ <- lists:seq(1,5)],
+empty_listeners() ->
+    [start_socket() || _ <- lists:seq(1,5)],
     ok.
