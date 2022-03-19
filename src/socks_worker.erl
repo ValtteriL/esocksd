@@ -12,7 +12,7 @@
     udp_associate,
     destroy
 }).
--record(state, {socket, stage = #stage.negotiate}).
+-record(state, {socket, connectsocket, stage = #stage.negotiate}).
 
 % defined values for METHOD
 -define(M_NOAUTH , 0). % NO AUTHENTICATION REQUIRED
@@ -124,8 +124,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
     case CMD of
         ?CMD_CONNECT ->
             io:fwrite("Worker: CONNECT request received~n"),
-            gen_tcp:shutdown(State#state.socket, write),
-            {stop, normal, State};
+            connect(four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT), State);
         ?CMD_BIND ->
             io:fwrite("Worker: BIN request received~n"),
             gen_tcp:shutdown(State#state.socket, write),
@@ -140,6 +139,18 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end;
+handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, socket=Socket}) ->
+    ok = inet:setopts(Socket, [{active, once}]),
+    io:format("Worker: CONNECT (passing data from client to destination)~n", []),
+    gen_tcp:send(State#state.connectsocket, Msg),
+    {noreply, State};
+handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectsocket=Socket}) ->
+    ok = inet:setopts(Socket, [{active, once}]),
+    io:format("Worker: CONNECT (passing data from destination to client)~n", []),
+    gen_tcp:send(State#state.socket, Msg),
+    {noreply, State};
+handle_info({tcp_closed, _Socket}, State) -> {stop, normal, State};
+handle_info({tcp_error, _Socket, _}, State) -> {stop, normal, State};
 handle_info(E, State) ->
     io:fwrite("unexpected: ~p~n", [E]),
     {noreply, State}.
@@ -150,6 +161,28 @@ code_change(_OldVersion, Tab, _Extra) -> {ok, Tab}.
 
 
 %%% helpers
+
+
+
+% handle CONNECT command
+connect(DST_ADDR, DST_PORT, State) ->
+    case  gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
+        {ok, Socket} ->
+            io:fwrite("Worker: Connected!~n"),
+            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, 127,0,0,1, 0,53>>),
+            ok = inet:setopts(Socket, [{active, once}]),
+            {noreply, State#state{stage=#stage.connect, connectsocket=Socket}};
+        {error, Reason} ->
+            case Reason of
+                enetunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_NETWORK_UNREACHABLE, ?RSV>>);
+                ehostunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_HOST_UNREACHABLE, ?RSV>>);
+                econnrefused -> gen_tcp:send(State#state.socket, <<5, ?REP_CONN_REFUSED, ?RSV>>);
+                _ -> gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV>>)
+            end,
+            gen_tcp:shutdown(State#state.socket, write),
+            {stop, normal, State}
+    end.
+
 
 % convert 4 bytes into tuple representation of IP address
 four_bytes_to_ipv4(Bytes) ->
