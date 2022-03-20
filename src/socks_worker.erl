@@ -42,6 +42,11 @@
 -define(REP_CMD_NOT_SUPPORTED, 7).
 -define(REP_ATYPE_NOT_SUPPORTED, 8).
 
+-define(REP_PADDING, <<?ATYP_IPV4, 0,0,0,0,0,0>>). % padding for replies where addr and port irrelevant 
+
+-define(HOST_ALLIFACES, <<0,0,0,0>>).
+-define(HOST_NOPORTS, <<0,0>>).
+
 
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
@@ -115,7 +120,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             {DST, T};
         _ ->
             io:fwrite("Worker: Unsupported ATYP received~n"),
-            gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV>>),
+            gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write)
     end,
 
@@ -126,16 +131,15 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             io:fwrite("Worker: CONNECT request received~n"),
             connect(four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT), State);
         ?CMD_BIND ->
-            io:fwrite("Worker: BIN request received~n"),
-            gen_tcp:shutdown(State#state.socket, write),
-            {stop, normal, State};
+            io:fwrite("Worker: BIND request received~n"),
+            bind(State);
         ?CMD_UDP_ASSOCIATE ->
             io:fwrite("Worker: UDP ASSOCIATE request received~n"),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State};
         _->
             io:fwrite("Worker: Unsupported CMD received~n"),
-            gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV>>),
+            gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end;
@@ -165,26 +169,99 @@ code_change(_OldVersion, Tab, _Extra) -> {ok, Tab}.
 
 
 % handle CONNECT command
+% connects to a remote host
+% stores the socket to connectsocket in state
+% then relay traffic between socket and connectsocket
 connect(DST_ADDR, DST_PORT, State) ->
     case  gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
         {ok, Socket} ->
             io:fwrite("Worker: Connected!~n"),
-            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, 127,0,0,1, 0,53>>),
+
+            {ok, {IfAddr, Port}} = inet:sockname(Socket),
+            PortBytes = integer_to_2byte_binary(Port),
+            IfAddrBytes = ipv4_to_four_bytes(IfAddr),
+            
+            % communicate the bound hostname and port
+            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
+
+            % convert received data to Erlang messages
             ok = inet:setopts(Socket, [{active, once}]),
+            
             {noreply, State#state{stage=#stage.connect, connectsocket=Socket}};
         {error, Reason} ->
             case Reason of
-                enetunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_NETWORK_UNREACHABLE, ?RSV>>);
-                ehostunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_HOST_UNREACHABLE, ?RSV>>);
-                econnrefused -> gen_tcp:send(State#state.socket, <<5, ?REP_CONN_REFUSED, ?RSV>>);
-                _ -> gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV>>)
+                enetunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_NETWORK_UNREACHABLE, ?RSV, ?REP_PADDING/binary>>);
+                ehostunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_HOST_UNREACHABLE, ?RSV, ?REP_PADDING/binary>>);
+                econnrefused -> gen_tcp:send(State#state.socket, <<5, ?REP_CONN_REFUSED, ?RSV, ?REP_PADDING/binary>>);
+                _ -> gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV, ?REP_PADDING/binary>>)
             end,
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end.
+
+% handle BIND command
+% starts listening for TCP connections
+% stores the listening socket to connectsocket
+% once connection received relay traffic between socket and connectsocket
+bind(State) ->
+    % bind socket on random tcp port
+    {ok, ListenSocket} = gen_tcp:listen(0, []),
+    {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
+
+    io:fwrite("Worker: Listening for connections on port ~B...~n", [Port]),
+
+    PortBytes = integer_to_2byte_binary(Port),
+    IfAddrBytes = ipv4_to_four_bytes(IfAddr),
+
+    % communicate the bound hostname and port
+    gen_tcp:send(<<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
+
+    % wait for connection to the socket
+    case gen_tcp:accept(ListenSocket, 60*1000*1) of
+        {ok, Socket} ->
+
+            io:fwrite("Worker: Connection accepted~n", []),
+
+            % convert received data to Erlang messages
+            ok = inet:setopts(Socket, [{active, once}]),
+
+            % get peer info
+            {ok,{RemoteAddr,RemotePort}} = inet:peername(Socket),
+            RemoteAddrBytes = ipv4_to_four_bytes(RemoteAddr),
+            RemotePortBytes = integer_to_2byte_binary(RemotePort),
+
+            io:fwrite("Worker: Connection received from ~p:~B!~n", [RemoteAddr, RemotePort]),
+
+            % communicate the received connection and peer details
+            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
+            {noreply, State#state{stage=#stage.connect, connectsocket=Socket}};
+        {error, _} ->
+
+            io:fwrite("Worker: Error accepting connection~n", []),
+
+            % communicate error
+            gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV, ?REP_PADDING/binary>>),
+            gen_tcp:shutdown(State#state.socket, write),
+            gen_tcp:close(ListenSocket),
+            {stop, normal, State}
+    end.
+
 
 
 % convert 4 bytes into tuple representation of IP address
 four_bytes_to_ipv4(Bytes) ->
     [A, B, C, D] = binary:bin_to_list(Bytes),
     {A, B, C, D}.
+
+ipv4_to_four_bytes({A,B,C,D}) ->
+     binary:list_to_bin([A, B,C,D]).
+
+% convert integer to 2-byte unsigned binary
+integer_to_2byte_binary(Integer) ->
+    Bytes = binary:encode_unsigned(Integer),
+    case byte_size(Bytes) of
+        1 ->
+            <<0, Bytes/binary>>;
+        2 ->
+            Bytes
+    end.
