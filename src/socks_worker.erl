@@ -9,10 +9,9 @@
     authenticate,
     request,
     connect,
-    udp_associate,
-    destroy
+    udp_associate
 }).
--record(state, {socket, connectsocket, stage = #stage.negotiate}).
+-record(state, {socket, connectsocket, stage = #stage.negotiate, udpClientIP, udpClientPort}).
 
 % defined values for METHOD
 -define(M_NOAUTH , 0). % NO AUTHENTICATION REQUIRED
@@ -23,6 +22,8 @@
 
 -define(M_NOTAVAILABLE , 255). % NO ACCEPTABLE METHODS
 -define(RSV, 0). % Reserved
+-define(UDP_RSV, <<0,0>>). % Reserved
+-define(UDP_FRAG, 0).
 
 -define(ATYP_IPV4, 1). % IP V4 address '01'
 -define(ATYP_IPV6, 4). % IP V6 address '04'
@@ -135,8 +136,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             bind(State);
         ?CMD_UDP_ASSOCIATE ->
             io:fwrite("Worker: UDP ASSOCIATE request received~n"),
-            gen_tcp:shutdown(State#state.socket, write),
-            {stop, normal, State};
+            udp_associate(four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT), State);
         _->
             io:fwrite("Worker: Unsupported CMD received~n"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
@@ -145,16 +145,56 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
     end;
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, socket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: CONNECT (passing data from client to destination)~n", []),
+    io:format("Worker: passing TCP data from client to destination~n", []),
     gen_tcp:send(State#state.connectsocket, Msg),
     {noreply, State};
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectsocket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: CONNECT (passing data from destination to client)~n", []),
+    io:format("Worker: passing TCP data from destination to client~n", []),
     gen_tcp:send(State#state.socket, Msg),
     {noreply, State};
 handle_info({tcp_closed, _Socket}, State) -> {stop, normal, State};
 handle_info({tcp_error, _Socket, _}, State) -> {stop, normal, State};
+
+% UDP port receives data with header
+% UDP port receives data without header
+handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connectsocket=Socket}) ->
+    ok = inet:setopts(Socket, [{active, once}]),
+    io:format("Worker: passing UDP data from client to destination~n", []),
+
+    {ok,{RemoteAddr, RemotePort}} = inet:peername(Socket),
+
+    % expect encapsulated traffic from client
+    case RemoteAddr == State#state.udpClientIP of
+        true ->
+            % client sent this (store the Port)
+            <<?RSV, ?RSV, ?UDP_FRAG,  ATYP, Rest/binary>> = Msg,
+            {DST_ADDR, DST_PORT, Data} = case ATYP of
+                ?ATYP_IPV4 ->
+                    <<DST:4/binary, T:2/binary, Datagram/binary>> = Rest,
+                    {DST, T, Datagram};
+                ?ATYP_DOMAINNAME ->
+                    <<DOMAIN_LEN, T1/binary>> = Rest,
+                    <<DST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
+                    {DST, T, Datagram};
+                ?ATYP_IPV6 ->
+                    <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
+                    {DST, T, Datagram}
+            end,
+            % relay Data to the destination
+            gen_udp:send(Socket, {four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT)}, Data),
+            {noreply, State=#state{udpClientPort=RemotePort}};
+        _->
+            % this is reply from the destination host
+            % prepend header and send to client
+            RemoteAddrBytes = ipv4_to_four_bytes(RemoteAddr),
+            RemotePortBytes = integer_to_2byte_binary(RemotePort),
+            Data = <<?UDP_RSV/binary, ?UDP_FRAG, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg>>,
+            gen_udp:send(Socket, {State#state.udpClientIP, State#state.udpClientPort}, Data),
+            {noreply, State}
+    end;
+
+
 handle_info(E, State) ->
     io:fwrite("unexpected: ~p~n", [E]),
     {noreply, State}.
@@ -246,6 +286,40 @@ bind(State) ->
             {stop, normal, State}
     end.
 
+
+% handle UDP ASSOCIATE command
+% starts listening for UDP connections
+% stores the socket somewhere
+% when data received on UDP, it is relayed based on the header
+% when destination host replies, header is prepended and datagram is sent to the client
+udp_associate(DST_ADDR, DST_PORT, State) ->
+    % bind socket on random udp port
+    {ok, ListenSocket} = gen_udp:listen(0),
+    {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
+
+    io:fwrite("Worker: Listening for UDP connections on ~p, port ~B...~n", [IfAddr,Port]),
+
+    PortBytes = integer_to_2byte_binary(Port),
+    IfAddrBytes = ipv4_to_four_bytes(IfAddr),
+
+    % communicate the bound hostname and port
+    gen_tcp:send(<<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
+
+    % convert received data to Erlang messages
+    ok = inet:setopts(ListenSocket, [{active, once}]),
+
+    UDPClient = case {DST_ADDR, DST_PORT} of
+        {{0,0,0,0}, 0} ->
+            % client does not know which IP:Port it will use - use the client IP 
+            {ok,{RemoteAddr,_RemotePort}} = inet:peername(State#state.socket),
+            RemoteAddr;
+        _ ->
+            % client uses this IP to send UDP traffic
+            DST_ADDR
+    end,
+
+    % store the ListenSocket and used IP
+    {noreply, State#state{stage=#stage.udp_associate, connectsocket=ListenSocket, udpClientIP=UDPClient}}.
 
 
 % convert 4 bytes into tuple representation of IP address
