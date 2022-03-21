@@ -5,13 +5,18 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 
 -record(stage,{
-    negotiate,
-    authenticate,
-    request,
-    connect,
-    udp_associate
+    handshake, % nothing exchanged yet - do handshake
+    authenticate, % handshake done and auth required - do authentication
+    request, % handshake (and auth) done - receive SOCKS request
+    connect, % CONNECT or BIND in place and connected - relay TCP traffic
+    udp_associate % UDP ASSOCIATE in place - relay UDP traffic
 }).
--record(state, {socket, connectsocket, stage = #stage.negotiate, udpClientIP, udpClientPort}).
+-record(state, {socket, connectsocket, stage = #stage.handshake, udpClientIP, udpClientPort}).
+
+% RFCs https://www.synopsys.com/software-integrity/security-testing/fuzz-testing/defensics/protocols/socks-client.html
+% SOCKS5
+% SOCKS5h 
+% TODO: TRY curl -x socks5h://localhost:9999 http://www.example.com/ <-- it fails atm
 
 % defined values for METHOD
 -define(M_NOAUTH , 0). % NO AUTHENTICATION REQUIRED
@@ -71,7 +76,7 @@ handle_cast(_, State) ->
 
 
 % handle tcp traffic
-handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.negotiate}) ->
+handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
     io:format("Worker: NEGOTIATION~n", []),
@@ -111,10 +116,11 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
     {DST_ADDR, DST_PORT} = case ATYP of
         ?ATYP_IPV4 ->
             <<DST:4/binary, T/binary>> = Rest,
-            {DST, T};
+            {four_bytes_to_ipv4(DST), T};
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, T1/binary>> = Rest,
-            <<DST:DOMAIN_LEN/binary, T/binary>> = T1,
+            <<DST_HOST:DOMAIN_LEN/binary, T/binary>> = T1,
+            {ok,{hostent,_,_,inet,4,[DST|_T]}} = inet:gethostbyname(binary_to_list(DST_HOST)),
             {DST, T};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
@@ -125,18 +131,18 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             gen_tcp:shutdown(State#state.socket, write)
     end,
 
-    io:format("Worker: CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT)]),
+    io:format("Worker: CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
 
     case CMD of
         ?CMD_CONNECT ->
             io:fwrite("Worker: CONNECT request received~n"),
-            connect(four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT), State);
+            connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         ?CMD_BIND ->
             io:fwrite("Worker: BIND request received~n"),
             bind(State);
         ?CMD_UDP_ASSOCIATE ->
             io:fwrite("Worker: UDP ASSOCIATE request received~n"),
-            udp_associate(four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT), State);
+            udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         _->
             io:fwrite("Worker: Unsupported CMD received~n"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
@@ -172,17 +178,18 @@ handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connect
             {DST_ADDR, DST_PORT, Data} = case ATYP of
                 ?ATYP_IPV4 ->
                     <<DST:4/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {DST, T, Datagram};
+                    {four_bytes_to_ipv4(DST), T, Datagram};
                 ?ATYP_DOMAINNAME ->
                     <<DOMAIN_LEN, T1/binary>> = Rest,
-                    <<DST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
+                    <<DST_HOST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
+                    {ok,{hostent,_,_,inet,4,[DST|_T]}} = inet:gethostbyname(binary_to_list(DST_HOST)),
                     {DST, T, Datagram};
                 ?ATYP_IPV6 ->
                     <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
                     {DST, T, Datagram}
             end,
             % relay Data to the destination
-            gen_udp:send(Socket, {four_bytes_to_ipv4(DST_ADDR), binary:decode_unsigned(DST_PORT)}, Data),
+            gen_udp:send(Socket, {DST_ADDR, binary:decode_unsigned(DST_PORT)}, Data),
             {noreply, State=#state{udpClientPort=RemotePort}};
         _->
             % this is reply from the destination host
