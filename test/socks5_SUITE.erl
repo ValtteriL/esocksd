@@ -173,7 +173,29 @@ connect_domain_ipv6(Config) ->
 
 % binding works when ipv4 address in request
 bind_ipv4(_Config) ->
-    1=2.
+    % get echoserver port in binary and do handshake with SOCKS server
+    Socket = do_handshake_noauth(),
+
+    % request BIND
+    ok = gen_tcp:send(Socket, <<5, ?CMD_BIND, ?RSV, ?ATYP_IPV4, 127,0,0,1, 0,0>>),
+    {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes:4/binary, PortBytes:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send message to the bound port
+    Msg = <<"HELO">>,
+    {ok, BindSock} = gen_tcp:connect("127.0.0.1", binary:decode_unsigned(PortBytes), [binary, {active, false}]),
+    ok = gen_tcp:send(BindSock, Msg),
+
+    % receive message from SOCKS proxy informing about the connection
+    {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _ClientIP:4/binary, _ClientPort:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % receive the message from SOCKS proxy
+    {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send the message to SOCKS proxy
+    ok = gen_tcp:send(Socket, Msg),
+
+    % receive the message from the Bound port socket
+    {ok, Msg} = gen_tcp:recv(BindSock, 0, ?TimeoutMilliSec).
 
 % binding works when ipv6 address in request
 bind_ipv6(_Config) ->
