@@ -85,6 +85,15 @@ handshake_without_methods(_Config) ->
 %            +----+-----+-------+------+----------+----------+
 
 
+do_handshake_noauth() ->
+
+    % connect to SOCKS host and do handshake with NOAUTH
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
+    {ok, <<5, ?M_NOAUTH>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    Socket.
+
+
 % CONNECT request by ipv4 address succeeds
 connect_ipv4(_Config) ->
 
@@ -92,10 +101,7 @@ connect_ipv4(_Config) ->
     Port = spawn_echoserver(),
     BinPort = integer_to_2byte_binary(Port),
 
-    % connect to SOCKS host and do handshake with NOAUTH
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
-    ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
-    {ok, <<5, ?M_NOAUTH>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
     ok = gen_tcp:send(Socket, <<5, ?CMD_CONNECT, ?RSV, ?ATYP_IPV4, 127,0,0,1, BinPort/binary>>),
@@ -114,10 +120,7 @@ connect_ipv6(_Config) ->
     Port = spawn_echoserver(),
     BinPort = integer_to_2byte_binary(Port),
 
-    % connect to SOCKS host and do handshake with NOAUTH
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
-    ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
-    {ok, <<5, ?M_NOAUTH>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv6 address
     ok = gen_tcp:send(Socket, <<5, ?CMD_CONNECT, ?RSV, ?ATYP_IPV6, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1, BinPort/binary>>),
@@ -130,14 +133,12 @@ connect_ipv6(_Config) ->
 
 % CONNECT request by domain resolving to ipv4 address succeeds
 connect_domain_ipv4(_Config) ->
+
     % start echo server on random port
     Port = spawn_echoserver(),
     BinPort = integer_to_2byte_binary(Port),
 
-    % connect to SOCKS host and do handshake with NOAUTH
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
-    ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
-    {ok, <<5, ?M_NOAUTH>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
     Domain = <<"localhost">>,
@@ -152,7 +153,24 @@ connect_domain_ipv4(_Config) ->
 
 % CONNECT request by domain resolving to ipv6 address succeeds
 connect_domain_ipv6(_Config) ->
-    1=2.
+    
+    % start echo server on random port
+    Port = spawn_echoserver(),
+    BinPort = integer_to_2byte_binary(Port),
+
+    Socket = do_handshake_noauth(),
+
+    % request to CONNECT to the echo server on ipv4 address
+    Domain = <<"ip6-localhost">>,
+    NDomain = byte_size(Domain),
+    ok = gen_tcp:send(Socket, <<5, ?CMD_CONNECT, ?RSV, ?ATYP_DOMAINNAME, NDomain, Domain/binary, BinPort/binary>>),
+    {ok, ?ReplySuccessIpv4} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send message to the echo server through SOCKS and verify it echoes back correctly
+    Msg = <<"HELO">>,
+    ok = gen_tcp:send(Socket, Msg),
+    {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec).
+
 
 %%%%%%%%
 %
