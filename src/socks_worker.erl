@@ -84,7 +84,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, T1/binary>> = Rest,
             <<DST_HOST:DOMAIN_LEN/binary, T/binary>> = T1,
-            {ok,{hostent,_,_,inet,4,[DST|_T]}} = inet:gethostbyname(binary_to_list(DST_HOST)),
+            DST = binary_to_list(DST_HOST),
             {DST, T};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
@@ -146,14 +146,14 @@ handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connect
                 ?ATYP_DOMAINNAME ->
                     <<DOMAIN_LEN, T1/binary>> = Rest,
                     <<DST_HOST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
-                    {ok,{hostent,_,_,inet,4,[DST|_T]}} = inet:gethostbyname(binary_to_list(DST_HOST)),
+                    DST = binary_to_list(DST_HOST),
                     {DST, T, Datagram};
                 ?ATYP_IPV6 ->
                     <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
                     {bytes_to_addr(DST), T, Datagram}
             end,
             % relay Data to the destination
-            gen_udp:send(Socket, {DST_ADDR, binary:decode_unsigned(DST_PORT)}, Data),
+            gen_udp:send(Socket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data),
             {noreply, State=#state{udpClientPort=RemotePort}};
         _->
             % this is reply from the destination host
