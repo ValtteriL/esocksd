@@ -80,7 +80,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
     {DST_ADDR, DST_PORT} = case ATYP of
         ?ATYP_IPV4 ->
             <<DST:4/binary, T/binary>> = Rest,
-            {four_bytes_to_ipv4(DST), T};
+            {bytes_to_addr(DST), T};
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, T1/binary>> = Rest,
             <<DST_HOST:DOMAIN_LEN/binary, T/binary>> = T1,
@@ -88,7 +88,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             {DST, T};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
-            {DST, T};
+            {bytes_to_addr(DST), T};
         _ ->
             io:fwrite("Worker: Unsupported ATYP received~n"),
             gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
@@ -142,7 +142,7 @@ handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connect
             {DST_ADDR, DST_PORT, Data} = case ATYP of
                 ?ATYP_IPV4 ->
                     <<DST:4/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {four_bytes_to_ipv4(DST), T, Datagram};
+                    {bytes_to_addr(DST), T, Datagram};
                 ?ATYP_DOMAINNAME ->
                     <<DOMAIN_LEN, T1/binary>> = Rest,
                     <<DST_HOST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
@@ -150,7 +150,7 @@ handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connect
                     {DST, T, Datagram};
                 ?ATYP_IPV6 ->
                     <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {DST, T, Datagram}
+                    {bytes_to_addr(DST), T, Datagram}
             end,
             % relay Data to the destination
             gen_udp:send(Socket, {DST_ADDR, binary:decode_unsigned(DST_PORT)}, Data),
@@ -158,7 +158,7 @@ handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connect
         _->
             % this is reply from the destination host
             % prepend header and send to client
-            RemoteAddrBytes = ipv4_to_four_bytes(RemoteAddr),
+            RemoteAddrBytes = addr_to_bytes(RemoteAddr),
             RemotePortBytes = integer_to_2byte_binary(RemotePort),
             Data = <<?UDP_RSV/binary, ?UDP_FRAG, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg>>,
             gen_udp:send(Socket, {State#state.udpClientIP, State#state.udpClientPort}, Data),
@@ -190,7 +190,7 @@ connect(DST_ADDR, DST_PORT, State) ->
 
             {ok, {IfAddr, Port}} = inet:sockname(Socket),
             PortBytes = integer_to_2byte_binary(Port),
-            IfAddrBytes = ipv4_to_four_bytes(IfAddr),
+            IfAddrBytes = addr_to_bytes(IfAddr),
             
             % communicate the bound hostname and port
             gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
@@ -222,7 +222,7 @@ bind(State) ->
     io:fwrite("Worker: Listening for connections on port ~B...~n", [Port]),
 
     PortBytes = integer_to_2byte_binary(Port),
-    IfAddrBytes = ipv4_to_four_bytes(IfAddr),
+    IfAddrBytes = addr_to_bytes(IfAddr),
 
     % communicate the bound hostname and port
     gen_tcp:send(<<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
@@ -238,7 +238,7 @@ bind(State) ->
 
             % get peer info
             {ok,{RemoteAddr,RemotePort}} = inet:peername(Socket),
-            RemoteAddrBytes = ipv4_to_four_bytes(RemoteAddr),
+            RemoteAddrBytes = addr_to_bytes(RemoteAddr),
             RemotePortBytes = integer_to_2byte_binary(RemotePort),
 
             io:fwrite("Worker: Connection received from ~p:~B!~n", [RemoteAddr, RemotePort]),
@@ -271,7 +271,7 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     io:fwrite("Worker: Listening for UDP connections on ~p, port ~B...~n", [IfAddr,Port]),
 
     PortBytes = integer_to_2byte_binary(Port),
-    IfAddrBytes = ipv4_to_four_bytes(IfAddr),
+    IfAddrBytes = addr_to_bytes(IfAddr),
 
     % communicate the bound hostname and port
     gen_tcp:send(<<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
@@ -293,13 +293,25 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     {noreply, State#state{stage=#stage.udp_associate, connectsocket=ListenSocket, udpClientIP=UDPClient}}.
 
 
-% convert 4 bytes into tuple representation of IP address
-four_bytes_to_ipv4(Bytes) ->
-    [A, B, C, D] = binary:bin_to_list(Bytes),
-    {A, B, C, D}.
+% convert bytes into tuple representation of IP address (tuple)
+bytes_to_addr(Bytes) ->
+    case byte_size(Bytes) of
+        4 ->
+            A = binary:bin_to_list(Bytes),
+            list_to_tuple(A);
+        16 ->
+            bytes_to_ipv6_addr(Bytes)
+    end.
 
-ipv4_to_four_bytes({A,B,C,D}) ->
-     binary:list_to_bin([A, B,C,D]).
+addr_to_bytes(Addr) ->
+    binary:list_to_bin(tuple_to_list(Addr)).
+
+bytes_to_ipv6_addr(Bytes) ->
+    bytes_to_ipv6_addr([], Bytes).
+bytes_to_ipv6_addr(Acc, <<H:2/binary, T/binary>>) ->
+    bytes_to_ipv6_addr(Acc ++ [binary:decode_unsigned(H)], T);
+bytes_to_ipv6_addr(Acc, <<>>) ->
+    list_to_tuple(Acc).
 
 % convert integer to 2-byte unsigned binary
 integer_to_2byte_binary(Integer) ->
