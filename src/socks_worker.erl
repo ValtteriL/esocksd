@@ -225,7 +225,7 @@ bind(State) ->
     IfAddrBytes = addr_to_bytes(IfAddr),
 
     % communicate the bound hostname and port
-    gen_tcp:send(<<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
+    gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
 
     % wait for connection to the socket
     case gen_tcp:accept(ListenSocket, 60*1000*1) of
@@ -244,7 +244,7 @@ bind(State) ->
             io:fwrite("Worker: Connection received from ~p:~B!~n", [RemoteAddr, RemotePort]),
 
             % communicate the received connection and peer details
-            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
+            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
             {noreply, State#state{stage=#stage.connect, connectsocket=Socket}};
         {error, _} ->
 
