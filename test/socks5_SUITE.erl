@@ -12,6 +12,8 @@
 all() -> [handshake, handshake_without_methods, connect_ipv4, connect_ipv6, connect_domain_ipv4, connect_domain_ipv6, bind_ipv4, bind_ipv6, bind_domain, udpassociate_ipv4, udpassociate_ipv6, udpassociate_domain].
  
 -define(TimeoutMilliSec, 10*1000).
+-define(HandshakeNoAuth, <<5, 1, ?M_NOAUTH>>).
+-define(ReplySuccessIpv4, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _Rest/binary>>).
 
 
 % start service
@@ -32,7 +34,7 @@ end_per_suite(Config) ->
 % Handshake
 %
 %%%%%%%%
-
+%
 %   SEND:
 %            +----+----------+----------+
 %            |VER | NMETHODS | METHODS  |
@@ -41,7 +43,7 @@ end_per_suite(Config) ->
 %            +----+----------+----------+
 %
 %   RECEIVE:
-%           +----+--------+
+%            +----+--------+
 %            |VER | METHOD |
 %            +----+--------+
 %            | 1  |   1    |
@@ -51,7 +53,7 @@ end_per_suite(Config) ->
 % Handshake with noauth succeeds
 handshake(_Config) ->
     {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
-    ok = gen_tcp:send(Socket, <<5, 1, ?M_NOAUTH>>),
+    ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
     {ok, Packet} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
     <<5, ?M_NOAUTH>> = Packet.
 
@@ -67,10 +69,43 @@ handshake_without_methods(_Config) ->
 % CONNECT request
 %
 %%%%%%%%
+%
+%   SEND:
+%            +----+-----+-------+------+----------+----------+
+%            |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+%            +----+-----+-------+------+----------+----------+
+%            | 1  |  1  | X'00' |  1   | Variable |    2     |
+%            +----+-----+-------+------+----------+----------+
+%
+%   RECEIVE:
+%            +----+-----+-------+------+----------+----------+
+%            |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+%            +----+-----+-------+------+----------+----------+
+%            | 1  |  1  | X'00' |  1   | Variable |    2     |
+%            +----+-----+-------+------+----------+----------+
+
 
 % CONNECT request by ipv4 address succeeds
 connect_ipv4(_Config) ->
-    1=2.
+
+    % start echo server on random port
+    Port = spawn_echoserver(),
+    BinPort = integer_to_2byte_binary(Port),
+
+    % connect to SOCKS host and do handshake with NOAUTH
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
+    {ok, <<5, ?M_NOAUTH>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % request to CONNECT to the echo server
+    ok = gen_tcp:send(Socket, <<5, ?CMD_CONNECT, ?RSV, ?ATYP_IPV4, 127,0,0,1, BinPort/binary>>),
+    {ok, ?ReplySuccessIpv4} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send message to the echo server through SOCKS and verify it echoes back correctly
+    Msg = <<"HELO">>,
+    ok = gen_tcp:send(Socket, Msg),
+    {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec).
+
 
 % CONNECT request by ipv6 address succeeds
 connect_ipv6(_Config) ->
@@ -119,3 +154,31 @@ udpassociate_ipv6(_Config) ->
 % udp associate works when domain address in request
 udpassociate_domain(_Config) ->
     1=2.
+
+
+
+%%% Helpers
+
+% spawn echo server on Port for testing purposes
+spawn_echoserver() ->
+    {ok, ListenSocket} = gen_tcp:listen(0, [binary]),
+    spawn_link(fun() -> 
+        {ok, Socket} = gen_tcp:accept(ListenSocket),
+        receive
+            {tcp, Socket, Data} ->
+                gen_tcp:send(Socket, Data),
+                ok = gen_tcp:shutdown(Socket, read)
+        end
+    end),
+    {ok, Port} = inet:port(ListenSocket),
+    Port.
+
+% convert integer to 2-byte unsigned binary
+integer_to_2byte_binary(Integer) ->
+    Bytes = binary:encode_unsigned(Integer),
+    case byte_size(Bytes) of
+        1 ->
+            <<0, Bytes/binary>>;
+        2 ->
+            Bytes
+    end.
