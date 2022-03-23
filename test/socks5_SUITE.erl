@@ -20,7 +20,8 @@ all() -> [handshake, handshake_without_methods, connect_ipv4, connect_ipv6, conn
 init_per_suite(Config) ->
     {ok, App} = esocksd_app:start(does, notmatter),
     unlink(App), % unlink App to keep it running
-    [{app, App}| Config].
+    EchoPort = spawn_echoserver(), % spawn echo server for tests
+    [{echoport, EchoPort},{app, App}| Config].
 
 % stop service
 end_per_suite(Config) ->
@@ -95,12 +96,10 @@ do_handshake_noauth() ->
 
 
 % CONNECT request by ipv4 address succeeds
-connect_ipv4(_Config) ->
+connect_ipv4(Config) ->
 
-    % start echo server on random port
-    Port = spawn_echoserver(),
-    BinPort = integer_to_2byte_binary(Port),
-
+    % get echoserver port in binary and do handshake with SOCKS server
+    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
@@ -114,12 +113,10 @@ connect_ipv4(_Config) ->
 
 
 % CONNECT request by ipv6 address succeeds
-connect_ipv6(_Config) ->
+connect_ipv6(Config) ->
     
-    % start echo server on random port
-    Port = spawn_echoserver(),
-    BinPort = integer_to_2byte_binary(Port),
-
+    % get echoserver port in binary and do handshake with SOCKS server
+    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv6 address
@@ -132,12 +129,10 @@ connect_ipv6(_Config) ->
     {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec).
 
 % CONNECT request by domain resolving to ipv4 address succeeds
-connect_domain_ipv4(_Config) ->
+connect_domain_ipv4(Config) ->
 
-    % start echo server on random port
-    Port = spawn_echoserver(),
-    BinPort = integer_to_2byte_binary(Port),
-
+    % get echoserver port in binary and do handshake with SOCKS server
+    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
@@ -152,12 +147,10 @@ connect_domain_ipv4(_Config) ->
     {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec).
 
 % CONNECT request by domain resolving to ipv6 address succeeds
-connect_domain_ipv6(_Config) ->
+connect_domain_ipv6(Config) ->
     
-    % start echo server on random port
-    Port = spawn_echoserver(),
-    BinPort = integer_to_2byte_binary(Port),
-
+    % get echoserver port in binary and do handshake with SOCKS server
+    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
@@ -214,17 +207,26 @@ udpassociate_domain(_Config) ->
 
 % spawn echo server on Port for testing purposes
 spawn_echoserver() ->
-    {ok, ListenSocket} = gen_tcp:listen(0, [binary]),
-    spawn_link(fun() -> 
-        {ok, Socket} = gen_tcp:accept(ListenSocket),
-        receive
-            {tcp, Socket, Data} ->
-                gen_tcp:send(Socket, Data),
-                ok = gen_tcp:shutdown(Socket, read)
-        end
+    {ok, ListenSocket} = gen_tcp:listen(0, [binary, {reuseaddr, true}]),
+    Handler = spawn(fun() -> 
+        server_loop(ListenSocket)
     end),
+    gen_tcp:controlling_process(ListenSocket, Handler),
     {ok, Port} = inet:port(ListenSocket),
     Port.
+
+server_loop(Socket) ->
+    {ok, Connection} = gen_tcp:accept(Socket),
+    Handler = spawn(fun () -> echo_loop(Connection) end),
+    gen_tcp:controlling_process(Connection, Handler),
+    server_loop(Socket).
+
+echo_loop(Connection) ->
+    receive
+        {tcp, Connection, Data} ->
+	        gen_tcp:send(Connection, Data),
+	        echo_loop(Connection)
+    end.
 
 % convert integer to 2-byte unsigned binary
 integer_to_2byte_binary(Integer) ->
