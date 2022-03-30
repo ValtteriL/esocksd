@@ -128,14 +128,14 @@ handle_info({tcp_error, _Socket, _}, State) -> {stop, normal, State};
 
 % UDP port receives data with header
 % UDP port receives data without header
-handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connectsocket=Socket}) ->
+%handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connectsocket=Socket}) ->
+handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_associate, connectsocket=Socket}) ->
+
     ok = inet:setopts(Socket, [{active, once}]),
     io:format("Worker: passing UDP data from client to destination~n", []),
 
-    {ok,{RemoteAddr, RemotePort}} = inet:peername(Socket),
-
     % expect encapsulated traffic from client
-    case RemoteAddr == State#state.udpClientIP of
+    case ((IP == State#state.udpClientIP) and ((InPortNo == State#state.udpClientPort) or (State#state.udpClientPort==undefined))) of
         true ->
             % client sent this (store the Port)
             <<?RSV, ?RSV, ?UDP_FRAG,  ATYP, Rest/binary>> = Msg,
@@ -154,14 +154,20 @@ handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connect
             end,
             % relay Data to the destination
             gen_udp:send(Socket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data),
-            {noreply, State=#state{udpClientPort=RemotePort}};
+            {noreply, State#state{udpClientPort=InPortNo}};
         _->
             % this is reply from the destination host
             % prepend header and send to client
-            RemoteAddrBytes = addr_to_bytes(RemoteAddr),
-            RemotePortBytes = integer_to_2byte_binary(RemotePort),
-            Data = <<?UDP_RSV/binary, ?UDP_FRAG, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg>>,
-            gen_udp:send(Socket, {State#state.udpClientIP, State#state.udpClientPort}, Data),
+            
+            RemoteAddrBytes = addr_to_bytes(IP),
+            RemotePortBytes = integer_to_2byte_binary(InPortNo),
+
+            % get type of address
+            ATYP = bytes_to_atyp(RemoteAddrBytes),
+
+            Data = <<?UDP_RSV/binary, ?UDP_FRAG, ATYP, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg/binary>>,
+            gen_udp:send(Socket, State#state.udpClientIP, State#state.udpClientPort, Data),
+            
             {noreply, State}
     end;
 
@@ -265,7 +271,8 @@ bind(State) ->
 % when destination host replies, header is prepended and datagram is sent to the client
 udp_associate(DST_ADDR, DST_PORT, State) ->
     % bind socket on random udp port
-    {ok, ListenSocket} = gen_udp:listen(0),
+    {ok, ListenSocket} = gen_udp:open(0, [binary, {active, once}]),
+    
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
 
     io:fwrite("Worker: Listening for UDP connections on ~p, port ~B...~n", [IfAddr,Port]),
@@ -274,7 +281,7 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     IfAddrBytes = addr_to_bytes(IfAddr),
 
     % communicate the bound hostname and port
-    gen_tcp:send(<<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
+    gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
 
     % convert received data to Erlang messages
     ok = inet:setopts(ListenSocket, [{active, once}]),
@@ -321,4 +328,16 @@ integer_to_2byte_binary(Integer) ->
             <<0, Bytes/binary>>;
         2 ->
             Bytes
+    end.
+
+
+% figre address type by bytes
+bytes_to_atyp(Bytes) ->
+    case byte_size(Bytes) of
+        4 ->
+            ?ATYP_IPV4;
+        16 ->
+            ?ATYP_IPV6;
+        _ ->
+            ?ATYP_DOMAINNAME
     end.
