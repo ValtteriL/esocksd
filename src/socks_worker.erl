@@ -153,7 +153,7 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
                     {bytes_to_addr(DST), T, Datagram}
             end,
             % relay Data to the destination
-            gen_udp:send(Socket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data),
+            ok = gen_udp:send(Socket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data),
             {noreply, State#state{udpClientPort=InPortNo}};
         _->
             % this is reply from the destination host
@@ -166,7 +166,7 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
             ATYP = bytes_to_atyp(RemoteAddrBytes),
 
             Data = <<?UDP_RSV/binary, ?UDP_FRAG, ATYP, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg/binary>>,
-            gen_udp:send(Socket, State#state.udpClientIP, State#state.udpClientPort, Data),
+            ok = gen_udp:send(Socket, State#state.udpClientIP, State#state.udpClientPort, Data),
             
             {noreply, State}
     end;
