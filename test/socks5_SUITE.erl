@@ -276,6 +276,20 @@ bind_domain(_Config) ->
 % UDP ASSOCIATE request
 %
 %%%%%%%%
+%   SEND:
+%            +----+-----+-------+------+----------+----------+
+%            |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+%            +----+-----+-------+------+----------+----------+
+%            | 1  |  1  | X'00' |  1   | Variable |    2     |
+%            +----+-----+-------+------+----------+----------+
+%
+%   RECEIVE:
+%            +----+-----+-------+------+----------+----------+
+%            |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+%            +----+-----+-------+------+----------+----------+
+%            | 1  |  1  | X'00' |  1   | Variable |    2     |
+%            +----+-----+-------+------+----------+----------+
+%
 
 % udp associate works when ipv4 address in request
 udpassociate_ipv4(_Config) ->
