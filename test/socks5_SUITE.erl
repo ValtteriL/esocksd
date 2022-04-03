@@ -327,7 +327,7 @@ udpassociate_ipv6(_Config) ->
     ok = gen_udp:connect(ClientUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
 
     {ok, ServerUdpSocket} = gen_udp:open(0, [binary, inet6, {active, false}]),
-    %ok = gen_udp:connect(ServerUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+    %ok = gen_udp:connect(ServerUdpSocket, {0,0,0,0,0,0,0,1}, binary:decode_unsigned(PortBytes)),
 
     % send message to server socket via SOCKS associate
     {ok, Port} = inet:port(ServerUdpSocket),
@@ -341,11 +341,11 @@ udpassociate_ipv6(_Config) ->
     {ok, {_Address, _Port, Msg}} = gen_udp:recv(ServerUdpSocket, 0, ?TimeoutMilliSec),
 
     % send msg from server to the client side
-    ok = gen_udp:send(ServerUdpSocket, Msg),
+    ok = gen_udp:send(ServerUdpSocket, {0,0,0,0,0,0,0,1}, binary:decode_unsigned(PortBytes), Msg),
 
     % receive the msg at client side (with headers)
-    {ok, {_Address, _Port, HdrMsg2}} = gen_udp:recv(ClientUdpSocket, 0, ?TimeoutMilliSec),
-    <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV4, _RemoteAddrBytes:4/binary, OwnPortBytes:2/binary, Msg/binary>> = HdrMsg2.
+    {ok, {_Address2, _Port2, HdrMsg2}} = gen_udp:recv(ClientUdpSocket, 0, ?TimeoutMilliSec),
+    <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV6, _RemoteAddrBytes:8/binary, OwnPortBytes:2/binary, Msg/binary>> = HdrMsg2.
 
 % udp associate works when domain address in request
 udpassociate_domain(_Config) ->
