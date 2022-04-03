@@ -315,7 +315,8 @@ udpassociate_ipv4(_Config) ->
 
 % udp associate works when ipv6 address in request
 udpassociate_ipv6(_Config) ->
-        % do handshake with SOCKS server
+        
+    % do handshake with SOCKS server
     Socket = do_handshake_noauth(),
 
     % request UDP ASSOCIATE
@@ -349,7 +350,40 @@ udpassociate_ipv6(_Config) ->
 
 % udp associate works when domain address in request
 udpassociate_domain(_Config) ->
-    1=2.
+    
+    % do handshake with SOCKS server
+    Socket = do_handshake_noauth(),
+
+    % request UDP ASSOCIATE
+    ok = gen_tcp:send(Socket, <<5, ?CMD_UDP_ASSOCIATE, ?RSV, ?ATYP_IPV4, 0,0,0,0, 0,0>>),
+    {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes:4/binary, PortBytes:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    
+    % create two udp sockets - first to act as the socks client, second as the destination host
+    {ok, ClientUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
+    ok = gen_udp:connect(ClientUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+
+    {ok, ServerUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
+    ok = gen_udp:connect(ServerUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+
+    % send message to server socket via SOCKS associate
+    {ok, Port} = inet:port(ServerUdpSocket),
+    Msg = <<"HELO">>,
+    OwnPortBytes = integer_to_2byte_binary(Port),
+    Domain = <<"localhost">>,
+    DomainLength = byte_size(Domain),
+    HdrMsg = <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_DOMAINNAME, DomainLength, Domain/binary, OwnPortBytes/binary, Msg/binary>>,
+
+    ok = gen_udp:send(ClientUdpSocket, HdrMsg),
+
+    % receive the msg from client at server side (without headers)
+    {ok, {_Address, _Port, Msg}} = gen_udp:recv(ServerUdpSocket, 0, ?TimeoutMilliSec),
+
+    % send msg from server to the client side
+    ok = gen_udp:send(ServerUdpSocket, Msg),
+
+    % receive the msg at client side (with headers)
+    {ok, {_Address, _Port, HdrMsg2}} = gen_udp:recv(ClientUdpSocket, 0, ?TimeoutMilliSec),
+    <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV4, _RemoteAddrBytes:4/binary, OwnPortBytes:2/binary, Msg/binary>> = HdrMsg2.
 
 
 
