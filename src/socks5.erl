@@ -10,7 +10,7 @@
 connect(DST_ADDR, DST_PORT, State) ->
     case  gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
         {ok, Socket} ->
-            io:fwrite("Worker: Connected!~n"),
+            logger:debug("Worker (in CONNECT): Connection established to remote host!"),
 
             {ok, {IfAddr, Port}} = inet:sockname(Socket),
             PortBytes = helpers:integer_to_2byte_binary(Port),
@@ -43,7 +43,7 @@ bind(State) ->
     {ok, ListenSocket} = gen_tcp:listen(0, []),
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
 
-    io:fwrite("Worker: Listening for connections on port ~B...~n", [Port]),
+    logger:debug("Worker (in BIND): Listening for connections on port ~B...~n", [Port]),
 
     PortBytes = helpers:integer_to_2byte_binary(Port),
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),
@@ -55,8 +55,6 @@ bind(State) ->
     case gen_tcp:accept(ListenSocket, 60*1000*1) of
         {ok, Socket} ->
 
-            io:fwrite("Worker: Connection accepted~n", []),
-
             % convert received data to Erlang messages
             ok = inet:setopts(Socket, [{active, once}]),
 
@@ -65,14 +63,14 @@ bind(State) ->
             RemoteAddrBytes = helpers:addr_to_bytes(RemoteAddr),
             RemotePortBytes = helpers:integer_to_2byte_binary(RemotePort),
 
-            io:fwrite("Worker: Connection received from ~p:~B!~n", [RemoteAddr, RemotePort]),
+            logger:info("Worker: Connection received from ~p:~B!", [RemoteAddr, RemotePort]),
 
             % communicate the received connection and peer details
             gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
             {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
         {error, _} ->
 
-            io:fwrite("Worker: Error accepting connection~n", []),
+            logger:info("Worker (in BIND): Error accepting connection"),
 
             % communicate error
             gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV, ?REP_PADDING/binary>>),
@@ -95,7 +93,7 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocketIpv4),
 
-    io:fwrite("Worker: Listening for UDP connections on ~p, port ~B...~n", [IfAddr,Port]),
+    logger:info("Worker (in UDP ASSOCIATE): Listening for UDP connections on ~p, port ~B", [IfAddr,Port]),
 
     PortBytes = helpers:integer_to_2byte_binary(Port),
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),

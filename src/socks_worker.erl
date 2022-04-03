@@ -22,7 +22,7 @@ handle_cast(accept, State) ->
 
     % accept new connection
     {ok, AcceptSocket} = gen_tcp:accept(State#state.socket),
-    io:format("Worker: Accepted connection!~n", []),
+    logger:debug("Worker: Accepted connection"),
 
     esocksd_sup:start_socket(), % start a new listener to replace this one
     {noreply, #state{socket=AcceptSocket }};
@@ -35,10 +35,10 @@ handle_cast(_, State) ->
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: NEGOTIATION~n", []),
+    logger:debug("Worker: Entered negotiation"),
 
     <<VER, NMETHODS, METHODS/binary>> = Msg,
-    io:format("Worker: SOCKS version: ~B, NMETHODS: ~B~n", [VER, NMETHODS]),
+    logger:debug("Worker: Received initial message SOCKS version: ~B, NMETHODS: ~B~n", [VER, NMETHODS]),
 
     ListMETHODS = binary:bin_to_list(METHODS),
 
@@ -46,18 +46,18 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
     case {lists:member(VER, ?SUPPORTED_VERSIONS), lists:member(?M_NOAUTH, ListMETHODS)}  of
         {true, true} ->
             % choose M_NOAUTH method, and move to next stage
-            io:fwrite("Worker: Supported SOCKS version and method found~n"),
+            logger:debug("Worker: Supported SOCKS version and method found"),
             gen_tcp:send(State#state.socket, <<VER, ?M_NOAUTH>>),
             {noreply, State#state{stage=#stage.request}};
         {false, _} ->
             % reply no, end connection, and terminate worker
-            io:fwrite("Worker: Unsupported SOCKS version...~n"),
+            logger:info("Worker: Unsupported SOCKS version"),
             gen_tcp:send(State#state.socket, <<5, ?M_NOTAVAILABLE>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State};
         _ -> 
             % reply no, end connection, and terminate worker
-            io:fwrite("Worker: Unsupported auth method proposed...~n"),
+            logger:info("Worker: Unsupported auth method proposed"),
             gen_tcp:send(State#state.socket, <<VER, ?M_NOTAVAILABLE>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
@@ -65,7 +65,7 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: REQUEST~n", []),
+    logger:debug("Worker: Received request"),
 
     <<_VER, CMD, ?RSV, ATYP, Rest/binary>> = Msg,
 
@@ -82,37 +82,37 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
             <<DST:16/binary, T/binary>> = Rest,
             {helpers:bytes_to_addr(DST), T};
         _ ->
-            io:fwrite("Worker: Unsupported ATYP received~n"),
+            logger:info("Worker: Unsupported ATYP reveived"),
             gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write)
     end,
 
-    io:format("Worker: CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
+    logger:debug("Worker: CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
 
     case CMD of
         ?CMD_CONNECT ->
-            io:fwrite("Worker: CONNECT request received~n"),
+            logger:debug("Worker: CONNECT request received"),
             socks5:connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         ?CMD_BIND ->
-            io:fwrite("Worker: BIND request received~n"),
+            logger:debug("Worker: BIND request received"),
             socks5:bind(State);
         ?CMD_UDP_ASSOCIATE ->
-            io:fwrite("Worker: UDP ASSOCIATE request received~n"),
+            logger:debug("Worker: UDP ASSOCIATE request received"),
             socks5:udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         _->
-            io:fwrite("Worker: Unsupported CMD received~n"),
+            logger:info("Worker: Unsupported CMD received"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end;
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, socket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: passing TCP data from client to destination~n", []),
+    logger:debug("Worker (in CONNECT): passing TCP data from client to destination"),
     gen_tcp:send(State#state.connectSocket, Msg),
     {noreply, State};
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectSocket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: passing TCP data from destination to client~n", []),
+    logger:debug("Worker (in CONNECT): passing TCP data from destination to client"),
     gen_tcp:send(State#state.socket, Msg),
     {noreply, State};
 handle_info({tcp_closed, _Socket}, State) -> {stop, normal, State};
@@ -123,14 +123,12 @@ handle_info({tcp_error, _Socket, _}, State) -> {stop, normal, State};
 handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_associate}) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
-    io:format("Worker: passing UDP data from client to destination~n", []),
-
-    logger:critical("IP = ~p (state is ~p), InPortNo = ~p (state is ~p)", [IP, State#state.udpClientIP, InPortNo, State#state.udpClientPort]),
+    logger:debug("Worker (in UDP ASSOCIATE): passing UDP data"),
 
     % expect encapsulated traffic from client
     case ((IP == State#state.udpClientIP) and ((InPortNo == State#state.udpClientPort) or (State#state.udpClientPort==undefined))) of
         true ->
-            logger:critical("CLIENT SENDS UDP TRAFFIC TO DST"),
+            logger:debug("Worker (in UDP ASSOCIATE): client sends UDP traffic to DST"),
             % client sent this (store the Port)
             <<?RSV, ?RSV, ?UDP_FRAG,  ATYP, Rest/binary>> = Msg,
             {DST_ADDR, DST_PORT, Data} = case ATYP of
@@ -158,7 +156,7 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
             {noreply, State#state{udpClientPort=InPortNo}};
         _->
 
-            logger:critical("DST SENDS UDP TRAFFIC TO CLIENT"),
+            logger:debug("Worker (in UDP ASSOCIATE): DST sends UDP traffic to client"),
             % this is reply from the destination host
             % prepend header and send to client
             
@@ -183,8 +181,7 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
 
 
 handle_info(E, State) ->
-    io:fwrite("unexpected: ~p~n", [E]),
-    logger:critical("UNEXPECTED: ~p", [E]),
+    logger:warning("UNEXPECTED: ~p", [E]),
     {noreply, State}.
 
 handle_call(_E, _From, State) -> {noreply, State}.
