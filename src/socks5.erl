@@ -52,7 +52,7 @@ bind(State) ->
     gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
 
     % wait for connection to the socket
-    case gen_tcp:accept(ListenSocket, 60*1000*1) of
+    case gen_tcp:accept(ListenSocket, 60*1000*2) of
         {ok, Socket} ->
 
             % convert received data to Erlang messages
