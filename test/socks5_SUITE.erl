@@ -99,7 +99,7 @@ do_handshake_noauth() ->
 connect_ipv4(Config) ->
 
     % get echoserver port in binary and do handshake with SOCKS server
-    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
+    BinPort = helpers:integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
@@ -116,7 +116,7 @@ connect_ipv4(Config) ->
 connect_ipv6(Config) ->
     
     % get echoserver port in binary and do handshake with SOCKS server
-    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
+    BinPort = helpers:integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv6 address
@@ -132,7 +132,7 @@ connect_ipv6(Config) ->
 connect_domain_ipv4(Config) ->
 
     % get echoserver port in binary and do handshake with SOCKS server
-    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
+    BinPort = helpers:integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
@@ -150,7 +150,7 @@ connect_domain_ipv4(Config) ->
 connect_domain_ipv6(Config) ->
     
     % get echoserver port in binary and do handshake with SOCKS server
-    BinPort = integer_to_2byte_binary(?config(echoport, Config)),
+    BinPort = helpers:integer_to_2byte_binary(?config(echoport, Config)),
     Socket = do_handshake_noauth(),
 
     % request to CONNECT to the echo server on ipv4 address
@@ -303,15 +303,15 @@ udpassociate_ipv4(_Config) ->
     
     % create two udp sockets - first to act as the socks client, second as the destination host
     {ok, ClientUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
-    ok = gen_udp:connect(ClientUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+    ok = gen_udp:connect(ClientUdpSocket, helpers:bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
 
     {ok, ServerUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
-    ok = gen_udp:connect(ServerUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+    ok = gen_udp:connect(ServerUdpSocket, helpers:bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
 
     % send message to server socket via SOCKS associate
     {ok, Port} = inet:port(ServerUdpSocket),
     Msg = <<"HELO">>,
-    OwnPortBytes = integer_to_2byte_binary(Port),
+    OwnPortBytes = helpers:integer_to_2byte_binary(Port),
     HdrMsg = <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV4, 127,0,0,1, OwnPortBytes/binary, Msg/binary>>,
 
     ok = gen_udp:send(ClientUdpSocket, HdrMsg),
@@ -339,7 +339,7 @@ udpassociate_ipv6(_Config) ->
     
     % create two udp sockets - first to act as the socks client, second as the destination host
     {ok, ClientUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
-    ok = gen_udp:connect(ClientUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+    ok = gen_udp:connect(ClientUdpSocket, helpers:bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
 
     {ok, ServerUdpSocket} = gen_udp:open(0, [binary, inet6, {active, false}]),
     %ok = gen_udp:connect(ServerUdpSocket, {0,0,0,0,0,0,0,1}, binary:decode_unsigned(PortBytes)),
@@ -347,7 +347,7 @@ udpassociate_ipv6(_Config) ->
     % send message to server socket via SOCKS associate
     {ok, Port} = inet:port(ServerUdpSocket),
     Msg = <<"HELO">>,
-    OwnPortBytes = integer_to_2byte_binary(Port),
+    OwnPortBytes = helpers:integer_to_2byte_binary(Port),
     HdrMsg = <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV6, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1, OwnPortBytes/binary, Msg/binary>>,
 
     ok = gen_udp:send(ClientUdpSocket, HdrMsg),
@@ -374,15 +374,15 @@ udpassociate_domain(_Config) ->
     
     % create two udp sockets - first to act as the socks client, second as the destination host
     {ok, ClientUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
-    ok = gen_udp:connect(ClientUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+    ok = gen_udp:connect(ClientUdpSocket, helpers:bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
 
     {ok, ServerUdpSocket} = gen_udp:open(0, [binary, {active, false}]),
-    ok = gen_udp:connect(ServerUdpSocket, bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
+    ok = gen_udp:connect(ServerUdpSocket, helpers:bytes_to_addr(IfAddrBytes), binary:decode_unsigned(PortBytes)),
 
     % send message to server socket via SOCKS associate
     {ok, Port} = inet:port(ServerUdpSocket),
     Msg = <<"HELO">>,
-    OwnPortBytes = integer_to_2byte_binary(Port),
+    OwnPortBytes = helpers:integer_to_2byte_binary(Port),
     Domain = <<"localhost">>,
     DomainLength = byte_size(Domain),
     HdrMsg = <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_DOMAINNAME, DomainLength, Domain/binary, OwnPortBytes/binary, Msg/binary>>,
@@ -434,33 +434,3 @@ echo_loop(Connection) ->
 	        gen_tcp:send(Connection, Data),
 	        echo_loop(Connection)
     end.
-
-% convert integer to 2-byte unsigned binary
-integer_to_2byte_binary(Integer) ->
-    Bytes = binary:encode_unsigned(Integer),
-    case byte_size(Bytes) of
-        1 ->
-            <<0, Bytes/binary>>;
-        2 ->
-            Bytes
-    end.
-
-% convert bytes into tuple representation of IP address (tuple)
-bytes_to_addr(Bytes) ->
-    case byte_size(Bytes) of
-        4 ->
-            A = binary:bin_to_list(Bytes),
-            list_to_tuple(A);
-        16 ->
-            bytes_to_ipv6_addr(Bytes)
-    end.
-
-addr_to_bytes(Addr) ->
-    binary:list_to_bin(tuple_to_list(Addr)).
-
-bytes_to_ipv6_addr(Bytes) ->
-    bytes_to_ipv6_addr([], Bytes).
-bytes_to_ipv6_addr(Acc, <<H:2/binary, T/binary>>) ->
-    bytes_to_ipv6_addr(Acc ++ [binary:decode_unsigned(H)], T);
-bytes_to_ipv6_addr(Acc, <<>>) ->
-    list_to_tuple(Acc).
