@@ -1,7 +1,74 @@
 -module(socks5).
 -include("socks5.hrl").
+-include("common.hrl").
 
--export([connect/3, bind/1, udp_associate/3]).
+-export([handshake/2, negotiate/2, connect/3, bind/1, udp_associate/3]).
+
+% SOCKS5 + SOCKS5H related functions
+% followed documents: 
+% - https://datatracker.ietf.org/doc/html/rfc1928
+
+handshake(Msg, State) ->
+    <<5, NMETHODS, METHODS/binary>> = Msg,
+    logger:debug("Worker: Received SOCKS5 handshake message with ~B methods", [NMETHODS]),
+
+    ListMETHODS = binary:bin_to_list(METHODS),
+
+    % check version and proposed auth method
+    case lists:member(?M_NOAUTH, ListMETHODS)  of
+        true ->
+            % choose M_NOAUTH method, and move to next stage
+            logger:debug("Worker: Supported SOCKS version and method found"),
+            gen_tcp:send(State#state.socket, <<5, ?M_NOAUTH>>),
+            {noreply, State#state{stage=#stage.request}};
+        _ -> 
+            % reply no, end connection, and terminate worker
+            logger:info("Worker: Unsupported auth method proposed"),
+            gen_tcp:send(State#state.socket, <<5, ?M_NOTAVAILABLE>>),
+            gen_tcp:shutdown(State#state.socket, write),
+            {stop, normal, State}
+    end.
+
+negotiate(Msg, State) ->
+    <<_VER, CMD, ?RSV, ATYP, Rest/binary>> = Msg,
+
+    {DST_ADDR, DST_PORT} = case ATYP of
+        ?ATYP_IPV4 ->
+            <<DST:4/binary, T/binary>> = Rest,
+            {helpers:bytes_to_addr(DST), T};
+        ?ATYP_DOMAINNAME ->
+            <<DOMAIN_LEN, T1/binary>> = Rest,
+            <<DST_HOST:DOMAIN_LEN/binary, T/binary>> = T1,
+            DST = binary_to_list(DST_HOST),
+            {DST, T};
+        ?ATYP_IPV6 ->
+            <<DST:16/binary, T/binary>> = Rest,
+            {helpers:bytes_to_addr(DST), T};
+        _ ->
+            logger:info("Worker: Unsupported ATYP reveived"),
+            gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
+            gen_tcp:shutdown(State#state.socket, write)
+    end,
+
+    logger:debug("Worker: Received SOCKS request CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
+
+    case CMD of
+        ?CMD_CONNECT ->
+            logger:debug("Worker: CONNECT request received"),
+            socks5:connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+        ?CMD_BIND ->
+            logger:debug("Worker: BIND request received"),
+            socks5:bind(State);
+        ?CMD_UDP_ASSOCIATE ->
+            logger:debug("Worker: UDP ASSOCIATE request received"),
+            socks5:udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+        _->
+            logger:info("Worker: Unsupported CMD received"),
+            gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
+            gen_tcp:shutdown(State#state.socket, write),
+            {stop, normal, State}
+    end.
+
 
 % handle CONNECT command
 % connects to a remote host

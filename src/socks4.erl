@@ -15,11 +15,28 @@ negotiate(Msg, State) ->
     <<4, CD, DSTPORT:2/binary, DSTIP:4/binary, Rest/binary>> = Msg,
     0 = binary:last(Rest),
 
+    % check for SOCKS4A 
+    % A server using protocol 4A must check the DSTIP in the request packet.
+    % If it represent address 0.0.0.x with nonzero x, the server must read
+    % in the domain name that the client sends in the packet. The server
+    % should resolve the domain name and make connection to the destination
+    % host if it can. 
+    DST_ADDR = case DSTIP of
+        <<0,0,0,X>> ->
+            % SOCKS4A request
+            false = X /= 0,
+            [_, Domain, _] = binary:split(Rest, <<0>>),
+            Domain;
+        _->
+            % SOCKS4 request
+            helpers:bytes_to_addr(DSTIP)
+    end,
+
     case CD of
         ?CD_CONNECT ->
-            connect(DSTIP, DSTPORT, State);
+            connect(DST_ADDR, binary:decode_unsigned(DSTPORT), State);
         ?CD_BIND ->
-            bind(DSTIP, State)
+            bind(DST_ADDR, State)
     end.
 
 
@@ -31,14 +48,14 @@ negotiate(Msg, State) ->
 connect(DST_ADDR, DST_PORT, State) ->
     case  gen_tcp:connect(DST_ADDR, DST_PORT, [{active, once}], 5000) of
         {ok, ConnectSocket} ->
-            logger:debug("Worker (in CONNECT): Connection established to remote host!"),
+            logger:debug("Worker (in CONNECT 4): Connection established to remote host!"),
             
             % communicate the bound hostname and port
             gen_tcp:send(State#state.socket, <<4, ?REQ_GRANTED, DST_PORT, DST_ADDR>>),
             
             {noreply, State#state{stage=#stage.connect, connectSocket=ConnectSocket}};
         {error, Reason} ->
-            logger:debug("Worker (in CONNECT): failed to connect to remote host: ~p", [Reason]),
+            logger:debug("Worker (in CONNECT 4): failed to connect to remote host: ~p", [Reason]),
             gen_tcp:send(State#state.socket, <<4, ?REQ_REJECTED_OR_FAILED, DST_PORT, DST_ADDR>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
@@ -53,7 +70,7 @@ bind(DST_ADDR, State) ->
     {ok, ListenSocket} = gen_tcp:listen(0, []),
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
 
-    logger:debug("Worker (in BIND): Listening for connections on port ~B...~n", [Port]),
+    logger:debug("Worker (in BIND 4): Listening for connections on port ~B...~n", [Port]),
 
     PortBytes = helpers:integer_to_2byte_binary(Port),
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),
@@ -73,7 +90,7 @@ bind(DST_ADDR, State) ->
             RemoteAddrBytes = helpers:addr_to_bytes(RemoteAddr),
             RemotePortBytes = helpers:integer_to_2byte_binary(RemotePort),
 
-            logger:info("Worker (in BIND): Connection received from ~p:~B!", [RemoteAddr, RemotePort]),
+            logger:info("Worker (in BIND 4): Connection received from ~p:~B!", [RemoteAddr, RemotePort]),
 
             % The SOCKS server checks the IP address of the originating host against
             % the value of DSTIP specified in the client's BIND request.  If a mismatch
@@ -88,7 +105,7 @@ bind(DST_ADDR, State) ->
                 DST_ADDR ->
                     gen_tcp:send(State#state.socket, <<4, ?REQ_GRANTED, RemoteAddrBytes/binary, RemotePortBytes/binary>>);
                 _ ->
-                    logger:debug("Worker (in BIND): Connection received from wrong host"),
+                    logger:debug("Worker (in BIND 4): Connection received from wrong host"),
                     gen_tcp:send(State#state.socket, <<4, ?REQ_REJECTED_OR_FAILED, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
                     gen_tcp:shutdown(State#state.socket, write),
                     gen_tcp:close(ListenSocket)
@@ -97,7 +114,7 @@ bind(DST_ADDR, State) ->
             {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
         {error, _} ->
 
-            logger:info("Worker (in BIND): Error accepting connection"),
+            logger:info("Worker (in BIND 4): Error accepting connection"),
 
             % communicate error
             gen_tcp:send(State#state.socket, <<4, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),

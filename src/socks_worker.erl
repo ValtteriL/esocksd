@@ -1,6 +1,7 @@
 -module(socks_worker).
 -behaviour(gen_server).
 -include("socks5.hrl").
+-include("common.hrl").
 
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
@@ -37,74 +38,19 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
     ok = inet:setopts(Socket, [{active, once}]),
     logger:debug("Worker: Entered negotiation"),
 
-    <<VER, NMETHODS, METHODS/binary>> = Msg,
-    logger:debug("Worker: Received initial message SOCKS version: ~B, NMETHODS: ~B~n", [VER, NMETHODS]),
+    <<VER, _/binary>> = Msg,
 
-    ListMETHODS = binary:bin_to_list(METHODS),
-
-    % check version and proposed auth method
-    case {lists:member(VER, ?SUPPORTED_VERSIONS), lists:member(?M_NOAUTH, ListMETHODS)}  of
-        {true, true} ->
-            % choose M_NOAUTH method, and move to next stage
-            logger:debug("Worker: Supported SOCKS version and method found"),
-            gen_tcp:send(State#state.socket, <<VER, ?M_NOAUTH>>),
-            {noreply, State#state{stage=#stage.request}};
-        {false, _} ->
-            % reply no, end connection, and terminate worker
-            logger:info("Worker: Unsupported SOCKS version"),
-            gen_tcp:send(State#state.socket, <<5, ?M_NOTAVAILABLE>>),
-            gen_tcp:shutdown(State#state.socket, write),
-            {stop, normal, State};
-        _ -> 
-            % reply no, end connection, and terminate worker
-            logger:info("Worker: Unsupported auth method proposed"),
-            gen_tcp:send(State#state.socket, <<VER, ?M_NOTAVAILABLE>>),
-            gen_tcp:shutdown(State#state.socket, write),
-            {stop, normal, State}
+    case VER of
+        4 ->
+            logger:debug("Worker: SOCKS4 chosen"),
+            socks4:negotiate(Msg, State); % SOCKS4 does not include handshake - go directly to negotiation
+        5 ->
+            logger:debug("Worker: SOCKS5 chosen"),
+            socks5:handshake(Msg, State)
     end;
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
-
     ok = inet:setopts(Socket, [{active, once}]),
-    logger:debug("Worker: Received request"),
-
-    <<_VER, CMD, ?RSV, ATYP, Rest/binary>> = Msg,
-
-    {DST_ADDR, DST_PORT} = case ATYP of
-        ?ATYP_IPV4 ->
-            <<DST:4/binary, T/binary>> = Rest,
-            {helpers:bytes_to_addr(DST), T};
-        ?ATYP_DOMAINNAME ->
-            <<DOMAIN_LEN, T1/binary>> = Rest,
-            <<DST_HOST:DOMAIN_LEN/binary, T/binary>> = T1,
-            DST = binary_to_list(DST_HOST),
-            {DST, T};
-        ?ATYP_IPV6 ->
-            <<DST:16/binary, T/binary>> = Rest,
-            {helpers:bytes_to_addr(DST), T};
-        _ ->
-            logger:info("Worker: Unsupported ATYP reveived"),
-            gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
-            gen_tcp:shutdown(State#state.socket, write)
-    end,
-
-    logger:debug("Worker: CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
-
-    case CMD of
-        ?CMD_CONNECT ->
-            logger:debug("Worker: CONNECT request received"),
-            socks5:connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
-        ?CMD_BIND ->
-            logger:debug("Worker: BIND request received"),
-            socks5:bind(State);
-        ?CMD_UDP_ASSOCIATE ->
-            logger:debug("Worker: UDP ASSOCIATE request received"),
-            socks5:udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
-        _->
-            logger:info("Worker: Unsupported CMD received"),
-            gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
-            gen_tcp:shutdown(State#state.socket, write),
-            {stop, normal, State}
-    end;
+    socks5:negotiate(Msg, State);
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, socket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
     logger:debug("Worker (in CONNECT): passing TCP data from client to destination"),
