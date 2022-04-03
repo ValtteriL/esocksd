@@ -197,13 +197,15 @@ bind_ipv4(_Config) ->
     ok = gen_tcp:send(Socket, <<5, ?CMD_BIND, ?RSV, ?ATYP_IPV4, 127,0,0,1, 0,0>>),
     {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _IfAddrBytes:4/binary, PortBytes:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
-    % send message to the bound port
+    % connect to the bound port
     Msg = <<"HELO">>,
     {ok, BindSock} = gen_tcp:connect("127.0.0.1", binary:decode_unsigned(PortBytes), [binary, {active, false}]),
-    ok = gen_tcp:send(BindSock, Msg),
 
     % receive message from SOCKS proxy informing about the connection
     {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _ClientIP:4/binary, _ClientPort:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send message to the bound port
+    ok = gen_tcp:send(BindSock, Msg),
 
     % receive the message from SOCKS proxy
     {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
@@ -224,13 +226,15 @@ bind_ipv6(_Config) ->
     ok = gen_tcp:send(Socket, <<5, ?CMD_BIND, ?RSV, ?ATYP_IPV6, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1, 0,0>>),
     {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _IfAddrBytes:4/binary, PortBytes:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
-    % send message to the bound port
+    % connect to the bound port
     Msg = <<"HELO">>,
     {ok, BindSock} = gen_tcp:connect("127.0.0.1", binary:decode_unsigned(PortBytes), [binary, {active, false}]),
-    ok = gen_tcp:send(BindSock, Msg),
 
     % receive message from SOCKS proxy informing about the connection
     {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _ClientIP:4/binary, _ClientPort:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send message to the bound port
+    ok = gen_tcp:send(BindSock, Msg),
 
     % receive the message from SOCKS proxy
     {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
@@ -254,13 +258,15 @@ bind_domain(_Config) ->
     ok = gen_tcp:send(Socket, <<5, ?CMD_BIND, ?RSV, ?ATYP_DOMAINNAME, NDomain, Domain/binary, 0,0>>),
     {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _IfAddrBytes:4/binary, PortBytes:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
-    % send message to the bound port
+    % connect to the bound port
     Msg = <<"HELO">>,
     {ok, BindSock} = gen_tcp:connect("127.0.0.1", binary:decode_unsigned(PortBytes), [binary, {active, false}]),
-    ok = gen_tcp:send(BindSock, Msg),
 
     % receive message from SOCKS proxy informing about the connection
     {ok, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, _ClientIP:4/binary, _ClientPort:2/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+
+    % send message to the bound port
+    ok = gen_tcp:send(BindSock, Msg),
 
     % receive the message from SOCKS proxy
     {ok, Msg} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
