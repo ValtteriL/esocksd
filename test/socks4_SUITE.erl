@@ -10,7 +10,7 @@
 all() -> [connect_ipv4, connect_domain_ipv4, bind_ipv4, bind_domain].
  
 -define(TimeoutMilliSec, 10*1000).
--define(ReplySuccessIpv4, <<4, ?REQ_GRANTED, _Rest/binary>>).
+-define(ReplySuccessIpv4, <<?REP_VERSION, ?REQ_GRANTED, _Rest/binary>>).
 
 
 % start service
@@ -111,14 +111,14 @@ bind_ipv4(_Config) ->
 
     UserId = <<"dummy">>,
     ok = gen_tcp:send(Socket, <<4, ?CD_BIND, 0,0, 127,0,0,1, UserId/binary, 0>>),
-    {ok, <<4, ?REQ_GRANTED, PortBytes:2/binary, _IfAddrBytes:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    {ok, <<?REP_VERSION, ?REQ_GRANTED, PortBytes:2/binary, _IfAddrBytes:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
     % connect to the bound port
     Msg = <<"HELO">>,
     {ok, BindSock} = gen_tcp:connect("127.0.0.1", binary:decode_unsigned(PortBytes), [binary, {active, false}]),
 
     % receive message from SOCKS proxy informing about the connection
-    {ok, <<4, ?REQ_GRANTED, _ClientPort:2/binary, _ClientIP:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    {ok, <<?REP_VERSION, ?REQ_GRANTED, _ClientPort:2/binary, _ClientIP:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
     % send message to the bound port
     ok = gen_tcp:send(BindSock, Msg),
@@ -144,14 +144,14 @@ bind_domain(_Config) ->
 
     % request BIND
     ok = gen_tcp:send(Socket, <<4, ?CD_BIND, 0,0, 0,0,0,1, UserId/binary, 0, Domain/binary, 0>>),
-    {ok, <<4, ?REQ_GRANTED, PortBytes:2/binary, _IfAddrBytes:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    {ok, <<?REP_VERSION, ?REQ_GRANTED, PortBytes:2/binary, _IfAddrBytes:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
     % connect to the bound port
     Msg = <<"HELO">>,
     {ok, BindSock} = gen_tcp:connect("127.0.0.1", binary:decode_unsigned(PortBytes), [binary, {active, false}]),
 
     % receive message from SOCKS proxy informing about the connection
-    {ok, <<4, ?REQ_GRANTED, _ClientPort:2/binary, _ClientIP:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
+    {ok, <<?REP_VERSION, ?REQ_GRANTED, _ClientPort:2/binary, _ClientIP:4/binary>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
 
     % send message to the bound port
     ok = gen_tcp:send(BindSock, Msg),

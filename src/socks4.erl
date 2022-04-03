@@ -60,7 +60,7 @@ connect(DST_ADDR, DST_PORT, State) ->
             PortBytes = helpers:integer_to_2byte_binary(DST_PORT),
             AddrBytes = helpers:addr_to_bytes(DST_ADDR),
 
-            gen_tcp:send(State#state.socket, <<4, ?REQ_GRANTED, PortBytes/binary, AddrBytes/binary>>),
+            gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_GRANTED, PortBytes/binary, AddrBytes/binary>>),
 
             % convert received data to Erlang messages
             ok = inet:setopts(ConnectSocket, [{active, once}]),
@@ -68,7 +68,7 @@ connect(DST_ADDR, DST_PORT, State) ->
             {noreply, State#state{stage=#stage.connect, connectSocket=ConnectSocket}};
         {error, Reason} ->
             logger:debug("Worker (in CONNECT 4): failed to connect to remote host: ~p", [Reason]),
-            gen_tcp:send(State#state.socket, <<4, ?REQ_REJECTED_OR_FAILED, DST_PORT/binary, DST_ADDR/binary>>),
+            gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, DST_PORT/binary, DST_ADDR/binary>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end.
@@ -88,7 +88,7 @@ bind(DST_ADDR, State) ->
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),
 
     % communicate the bound hostname and port
-    gen_tcp:send(State#state.socket, <<4, ?REQ_GRANTED, PortBytes/binary, IfAddrBytes/binary>>),
+    gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_GRANTED, PortBytes/binary, IfAddrBytes/binary>>),
 
     % wait for connection to the socket
     case gen_tcp:accept(ListenSocket, 60*1000*2) of
@@ -115,10 +115,10 @@ bind(DST_ADDR, State) ->
 
             case RemoteAddr of
                 DST_ADDR ->
-                    gen_tcp:send(State#state.socket, <<4, ?REQ_GRANTED, RemotePortBytes/binary, RemoteAddrBytes/binary>>);
+                    gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_GRANTED, RemotePortBytes/binary, RemoteAddrBytes/binary>>);
                 _ ->
                     logger:debug("Worker (in BIND 4): Connection received from wrong host"),
-                    gen_tcp:send(State#state.socket, <<4, ?REQ_REJECTED_OR_FAILED, RemotePortBytes/binary, RemoteAddrBytes/binary>>),
+                    gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, RemotePortBytes/binary, RemoteAddrBytes/binary>>),
                     gen_tcp:shutdown(State#state.socket, write),
                     gen_tcp:close(ListenSocket)
             end,
@@ -129,7 +129,7 @@ bind(DST_ADDR, State) ->
             logger:info("Worker (in BIND 4): Error accepting connection"),
 
             % communicate error
-            gen_tcp:send(State#state.socket, <<4, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),
+            gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),
             gen_tcp:shutdown(State#state.socket, write),
             gen_tcp:close(ListenSocket),
             {stop, normal, State}

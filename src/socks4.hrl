@@ -1,6 +1,9 @@
 % commands of SOCKS4
--define(CD_CONNECT , 1).
+-define(CD_CONNECT, 1).
 -define(CD_BIND, 2).
+
+% reply code version
+-define(REP_VERSION, 0).
 
 % responses for SOCKS4 requests
 -define(REQ_GRANTED, 90).

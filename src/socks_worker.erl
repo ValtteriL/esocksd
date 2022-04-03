@@ -7,10 +7,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 
 
-% RFCs https://www.synopsys.com/software-integrity/security-testing/fuzz-testing/defensics/protocols/socks-client.html
-% SOCKS5
-% SOCKS5h 
-
 start_link(Socket) ->
     gen_server:start_link(?MODULE, [Socket], []).
 
