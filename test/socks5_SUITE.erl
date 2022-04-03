@@ -357,12 +357,21 @@ udpassociate_domain(_Config) ->
 
 % spawn echo server on Port for testing purposes
 spawn_echoserver() ->
-    {ok, ListenSocket} = gen_tcp:listen(0, [binary, {reuseaddr, true}]),
+    % ipv4
+    {ok, ListenSocket} = gen_tcp:listen(0, [binary, inet, {reuseaddr, true}]),
     Handler = spawn(fun() -> 
         server_loop(ListenSocket)
     end),
     gen_tcp:controlling_process(ListenSocket, Handler),
     {ok, Port} = inet:port(ListenSocket),
+
+    % ipv6
+    {ok, ListenSocket2} = gen_tcp:listen(Port, [binary, inet6, {reuseaddr, true}]),
+    Handler2 = spawn(fun() -> 
+        server_loop(ListenSocket2)
+    end),
+    gen_tcp:controlling_process(ListenSocket2, Handler2),
+
     Port.
 
 server_loop(Socket) ->
