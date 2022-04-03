@@ -2,7 +2,7 @@
 -include("socks5.hrl").
 -include("common.hrl").
 
--export([handshake/2, negotiate/2, connect/3, bind/1, udp_associate/3]).
+-export([handshake/2, negotiate/2]).
 
 % SOCKS5 + SOCKS5H related functions
 % followed documents: 
@@ -55,13 +55,13 @@ negotiate(Msg, State) ->
     case CMD of
         ?CMD_CONNECT ->
             logger:debug("Worker: CONNECT request received"),
-            socks5:connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+            connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         ?CMD_BIND ->
             logger:debug("Worker: BIND request received"),
-            socks5:bind(State);
+            bind(State);
         ?CMD_UDP_ASSOCIATE ->
             logger:debug("Worker: UDP ASSOCIATE request received"),
-            socks5:udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+            udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         _->
             logger:info("Worker: Unsupported CMD received"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
