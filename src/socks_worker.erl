@@ -12,7 +12,7 @@
     connect, % CONNECT or BIND in place and connected - relay TCP traffic
     udp_associate % UDP ASSOCIATE in place - relay UDP traffic
 }).
--record(state, {socket, connectsocket, stage = #stage.handshake, udpClientIP, udpClientPort}).
+-record(state, {socket, connectSocket, connectSocketIpv6, stage = #stage.handshake, udpClientIP, udpClientPort}).
 
 % RFCs https://www.synopsys.com/software-integrity/security-testing/fuzz-testing/defensics/protocols/socks-client.html
 % SOCKS5
@@ -116,9 +116,9 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, socket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
     io:format("Worker: passing TCP data from client to destination~n", []),
-    gen_tcp:send(State#state.connectsocket, Msg),
+    gen_tcp:send(State#state.connectSocket, Msg),
     {noreply, State};
-handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectsocket=Socket}) ->
+handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectSocket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
     io:format("Worker: passing TCP data from destination to client~n", []),
     gen_tcp:send(State#state.socket, Msg),
@@ -128,15 +128,17 @@ handle_info({tcp_error, _Socket, _}, State) -> {stop, normal, State};
 
 % UDP port receives data with header
 % UDP port receives data without header
-%handle_info({udp, Socket, Msg}, State=#state{stage=#stage.udp_associate, connectsocket=Socket}) ->
-handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_associate, connectsocket=Socket}) ->
+handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_associate}) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
     io:format("Worker: passing UDP data from client to destination~n", []),
 
+    logger:critical("IP = ~p (state is ~p), InPortNo = ~p (state is ~p)", [IP, State#state.udpClientIP, InPortNo, State#state.udpClientPort]),
+
     % expect encapsulated traffic from client
     case ((IP == State#state.udpClientIP) and ((InPortNo == State#state.udpClientPort) or (State#state.udpClientPort==undefined))) of
         true ->
+            logger:critical("CLIENT SENDS UDP TRAFFIC TO DST"),
             % client sent this (store the Port)
             <<?RSV, ?RSV, ?UDP_FRAG,  ATYP, Rest/binary>> = Msg,
             {DST_ADDR, DST_PORT, Data} = case ATYP of
@@ -152,10 +154,19 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
                     <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
                     {bytes_to_addr(DST), T, Datagram}
             end,
+
             % relay Data to the destination
-            ok = gen_udp:send(Socket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data),
+            case ATYP of
+                ?ATYP_IPV6 ->
+                    ok = gen_udp:send(State#state.connectSocketIpv6, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
+                _ ->
+                    ok = gen_udp:send(State#state.connectSocket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data)
+            end,
+
             {noreply, State#state{udpClientPort=InPortNo}};
         _->
+
+            logger:critical("DST SENDS UDP TRAFFIC TO CLIENT"),
             % this is reply from the destination host
             % prepend header and send to client
             
@@ -166,7 +177,14 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
             ATYP = bytes_to_atyp(RemoteAddrBytes),
 
             Data = <<?UDP_RSV/binary, ?UDP_FRAG, ATYP, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg/binary>>,
-            ok = gen_udp:send(Socket, State#state.udpClientIP, State#state.udpClientPort, Data),
+
+            % send Data to client using suitable socket
+            case tuple_size(State#state.udpClientIP) of
+                4 -> 
+                    ok = gen_udp:send(State#state.connectSocket, State#state.udpClientIP, State#state.udpClientPort, Data);
+                _ ->
+                    ok = gen_udp:send(State#state.connectSocketIpv6, State#state.udpClientIP, State#state.udpClientPort, Data)
+            end,
             
             {noreply, State}
     end;
@@ -174,6 +192,7 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
 
 handle_info(E, State) ->
     io:fwrite("unexpected: ~p~n", [E]),
+    logger:critical("UNEXPECTED: ~p", [E]),
     {noreply, State}.
 
 handle_call(_E, _From, State) -> {noreply, State}.
@@ -187,8 +206,8 @@ code_change(_OldVersion, Tab, _Extra) -> {ok, Tab}.
 
 % handle CONNECT command
 % connects to a remote host
-% stores the socket to connectsocket in state
-% then relay traffic between socket and connectsocket
+% stores the socket to connectSocket in state
+% then relay traffic between socket and connectSocket
 connect(DST_ADDR, DST_PORT, State) ->
     case  gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
         {ok, Socket} ->
@@ -204,7 +223,7 @@ connect(DST_ADDR, DST_PORT, State) ->
             % convert received data to Erlang messages
             ok = inet:setopts(Socket, [{active, once}]),
             
-            {noreply, State#state{stage=#stage.connect, connectsocket=Socket}};
+            {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
         {error, Reason} ->
             case Reason of
                 enetunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_NETWORK_UNREACHABLE, ?RSV, ?REP_PADDING/binary>>);
@@ -218,8 +237,8 @@ connect(DST_ADDR, DST_PORT, State) ->
 
 % handle BIND command
 % starts listening for TCP connections
-% stores the listening socket to connectsocket
-% once connection received relay traffic between socket and connectsocket
+% stores the listening socket to connectSocket
+% once connection received relay traffic between socket and connectSocket
 bind(State) ->
     % bind socket on random tcp port
     {ok, ListenSocket} = gen_tcp:listen(0, []),
@@ -251,7 +270,7 @@ bind(State) ->
 
             % communicate the received connection and peer details
             gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
-            {noreply, State#state{stage=#stage.connect, connectsocket=Socket}};
+            {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
         {error, _} ->
 
             io:fwrite("Worker: Error accepting connection~n", []),
@@ -270,10 +289,12 @@ bind(State) ->
 % when data received on UDP, it is relayed based on the header
 % when destination host replies, header is prepended and datagram is sent to the client
 udp_associate(DST_ADDR, DST_PORT, State) ->
-    % bind socket on random udp port
-    {ok, ListenSocket} = gen_udp:open(0, [binary, {active, once}]),
+    % bind socket on random udp port on both ipv4 and ipv6
+    {ok, ListenSocketIpv4} = gen_udp:open(0, [inet, binary, {active, once}]),
+    {ok, Port} = inet:port(ListenSocketIpv4),
+    {ok, ListenSocketIpv6} = gen_udp:open(Port, [inet6, binary, {active, once}]),
     
-    {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
+    {ok, {IfAddr, Port}} = inet:sockname(ListenSocketIpv4),
 
     io:fwrite("Worker: Listening for UDP connections on ~p, port ~B...~n", [IfAddr,Port]),
 
@@ -283,11 +304,8 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     % communicate the bound hostname and port
     gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, IfAddrBytes/binary, PortBytes/binary>>),
 
-    % convert received data to Erlang messages
-    ok = inet:setopts(ListenSocket, [{active, once}]),
-
     UDPClient = case {DST_ADDR, DST_PORT} of
-        {{0,0,0,0}, 0} ->
+        {IP, 0} when (IP == {0,0,0,0}) or (IP == {0,0,0,0,0,0,0,0}) ->
             % client does not know which IP:Port it will use - use the client IP 
             {ok,{RemoteAddr,_RemotePort}} = inet:peername(State#state.socket),
             RemoteAddr;
@@ -297,7 +315,7 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     end,
 
     % store the ListenSocket and used IP
-    {noreply, State#state{stage=#stage.udp_associate, connectsocket=ListenSocket, udpClientIP=UDPClient}}.
+    {noreply, State#state{stage=#stage.udp_associate, connectSocket=ListenSocketIpv4, connectSocketIpv6=ListenSocketIpv6, udpClientIP=UDPClient}}.
 
 
 % convert bytes into tuple representation of IP address (tuple)
@@ -336,7 +354,7 @@ bytes_to_atyp(Bytes) ->
     case byte_size(Bytes) of
         4 ->
             ?ATYP_IPV4;
-        16 ->
+        8 ->
             ?ATYP_IPV6;
         _ ->
             ?ATYP_DOMAINNAME
