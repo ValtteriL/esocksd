@@ -24,6 +24,7 @@ negotiate(Msg, State) ->
     DST_ADDR = case DSTIP of
         <<0,0,0,X>> ->
             % SOCKS4A request
+            logger:debug("Worker: SOCKS4A domain received"),
             false = (X == 0),
             [_, Domain, _] = binary:split(Rest, <<0>>, [global]),
             {ok,{hostent,_,_,inet,4,[Addr|_]}} = inet:gethostbyname(binary_to_list(Domain)), % resolve name to ipv4 address
@@ -34,12 +35,13 @@ negotiate(Msg, State) ->
     end,
 
     Port = binary:decode_unsigned(DSTPORT),
-    logger:critical("DST_ADDR = ~p, DSTPORT = ~p", [DST_ADDR, Port]),
 
     case CD of
         ?CD_CONNECT ->
+            logger:debug("Worker: SOCKS4 CONNECT request received"),
             connect(DST_ADDR, Port, State);
         ?CD_BIND ->
+            logger:debug("Worker: SOCKS4 BIND request received"),
             bind(DST_ADDR, State)
     end.
 
@@ -50,7 +52,6 @@ negotiate(Msg, State) ->
 % stores the socket to connectSocket in state
 % then relay traffic between socket and connectSocket
 connect(DST_ADDR, DST_PORT, State) ->
-    logger:critical("DST_ADDR = ~p, DSTPORT = ~p", [DST_ADDR, DST_PORT]),
     case gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
         {ok, ConnectSocket} ->
             logger:debug("Worker (in CONNECT 4): Connection established to remote host!"),
