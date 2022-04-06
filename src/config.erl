@@ -4,7 +4,38 @@
 
 % load configuration from filename
 load(Filename) ->
-    asd.
+    
+    % create ETS table for config
+    ets:new(?MODULE, [set, named_table]),
+
+    % read file into list
+    {ok, Content} = file:read_file(Filename),
+    Parts = binary:split(Content, [<<"\n">>], [trim_all, global]),
+
+    % discard comments and empty lines 
+    Configlines = lists:filter(fun(X) -> 
+        (re:run(X, "^#") ==  nomatch) and
+        (re:run(X, "^\\h*$") == nomatch)
+    end, 
+    Parts),
+
+    % TODO: store config to ETS
+    lists:foreach(fun(Line) ->
+        case re:run(Line, "\\h", [trim]) of
+            ["ListenAddress"|Rest] -> ok;
+            ["Port"|Rest] -> ok;
+            ["LogLevel"|Rest] -> ok;
+            ["LogFile"|Rest] -> ok;
+            ["AuthMethod"|Rest] -> ok;
+            ["AuthFile"|Rest] -> ok;
+            ["AllowCommands"|Rest] -> ok;
+            ["AllowNetwork"|Rest] -> ok;
+            ["DisallowNetwork"|Rest] -> ok
+        end
+    end, 
+    Configlines),
+
+    ok.
 
 % check if authentication required by config
 auth_required() ->
@@ -25,3 +56,8 @@ auth_credentials_correct(Username, Password) ->
 % get all address and port combinations the SOCKS server should listen on
 listen_addresses() ->
     [].
+
+
+%%% helpers
+
+
