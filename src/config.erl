@@ -168,12 +168,12 @@ store_network(Network, AllowDisallow) ->
         4 ->
             % ipv4
             true = (FixedBitsInt >= 0) and (FixedBitsInt =< 32),
-            true = ets:insert({AllowDisallow, inet, AddrTuple, FixedBitsInt}),
+            true = ets:insert(?MODULE, {AllowDisallow, inet, AddrTuple, FixedBitsInt}),
             ok;
         8 ->
             % ipv6
             true = (FixedBitsInt >= 0) and (FixedBitsInt =< 128),
-            true = ets:insert({AllowDisallow, inet6, AddrTuple, FixedBitsInt}),
+            true = ets:insert(?MODULE, {AllowDisallow, inet6, AddrTuple, FixedBitsInt}),
             ok
     end.
 
