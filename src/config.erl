@@ -109,8 +109,16 @@ auth_credentials_correct(Username, Password) ->
 
 % get all address and port combinations the SOCKS server should listen on
 listen_addresses() ->
-    %TODO
-    [].
+    ListenAddresses = ets:lookup(?MODULE, listenaddress),
+    Ports = ets:lookup(?MODULE, port),
+
+    % generate list of {ListenAddress, Port}
+    lists:flatmap(fun({listenaddress, Addr}) -> 
+        lists:map(fun({port, Port}) ->
+            {Addr, Port}
+        end, Ports)
+        end, 
+    ListenAddresses).
 
 
 %%% helpers
