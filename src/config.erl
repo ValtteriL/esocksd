@@ -1,128 +1,106 @@
 -module(config).
 
--export([load/1, auth_required/0, command_allowed/1, address_allowed/1, auth_credentials_correct/2, listen_addresses/0]).
+-export([load/0, auth_required/0, command_allowed/1, address_allowed/1, auth_credentials_correct/2, listen_addresses/0]).
 
 -define(LOG_LEVELS, [emergency, alert, critical, error, warning, notice, info, debug]).
 -define(AUTH_METHODS, [userpass, none]).
 -define(COMMANDS, [connect, bind, udp_associate]).
 
-% default config values
--define(DEFAULT_VALUES, [
-    {listenaddress, ["0.0.0.0", "::"]}, 
-    {port, ["1080"]}, 
-    {loglevel, ["notice"]}, 
-    {logfile, ["esocksd.log"]}, 
-    {authmethod, ["none"]},
-    {allowcommands, ["connect", "bind", "udp_associate"]}, 
-    {allownetwork, ["0.0.0.0/0", "::/0"]}, 
-    {disallownetwork, []}
+
+-define(DEFAULT_LISTENADDRESS, ["0.0.0.0", "::"]).
+-define(DEFAULT_PORT, [1080]).
+-define(DEFAULT_LOGLEVEL, notice).
+-define(DEFAULT_LOGFILE, "esocksd.log").
+-define(DEFAULT_AUTHMETHOD, none).
+-define(DEFAULT_ALLOWCOMMANDS, [connect, bind, udp_associate]).
+-define(DEFAULT_NETWORKACL, [
+    {allow, "0.0.0.0/0"}
 ]).
+-define(DEFAULT_NETWORKACL_6, [
+    {allow, "::/0"}
+]).
+-define(DEFAULT_USERPASS, []).
 
 
+-define(CONFIG_COMMANDS, [listenaddress, port, loglevel, logfile, authmethod, userpass, allowcommands, networkacl, networkacl6]).
 
-% load configuration from filename
-load(Filename) ->
+% load configuration
+load() ->
     
-    % create ETS table for config
-    ets:new(?MODULE, [bag, named_table]),
-
-    % read file into list
-    {ok, Content} = file:read_file(Filename),
-    Parts = binary:split(Content, [<<"\n">>], [trim_all, global]),
-
-    % discard comments and empty lines 
-    Configlines = lists:filter(fun(X) -> 
-        (re:run(X, "^#") ==  nomatch) and
-        (re:run(X, "^\\h*$") == nomatch)
-    end, 
-    Parts),
+    % use default config for unset values
+    set_env_if_unset(listenaddress, ?DEFAULT_LISTENADDRESS),
+    set_env_if_unset(port, ?DEFAULT_PORT),
+    set_env_if_unset(loglevel, ?DEFAULT_LOGLEVEL),
+    set_env_if_unset(logfile, ?DEFAULT_LOGFILE),
+    set_env_if_unset(authmethod, ?DEFAULT_AUTHMETHOD),
+    set_env_if_unset(userpass, ?DEFAULT_USERPASS),
+    set_env_if_unset(allowcommands, ?DEFAULT_ALLOWCOMMANDS),
+    set_env_if_unset(networkacl, ?DEFAULT_NETWORKACL),
+    set_env_if_unset(networkacl6, ?DEFAULT_NETWORKACL_6),
 
     % store config to ETS
-    lists:foreach(fun(Line) ->
-        case re:split(Line, "\\h+", [trim, {return, list}]) of
-            ["ListenAddress", Rest] -> 
-                store_listenaddress(Rest);
-            ["Port", Rest] -> 
-                store_port(Rest);
-            ["LogLevel", Rest] -> 
-                store_loglevel(Rest);
-            ["LogFile", Rest] ->
-                true = ets:insert(?MODULE, {logfile, Rest});
-            ["AuthMethod", Rest] -> 
-                store_authmethod(Rest);
-            ["AuthFile", Rest] -> 
-                true = ets:insert(?MODULE, {authfile, Rest});
-            ["AllowCommands"|Rest] ->
-                store_allowcommands(Rest);
-            ["AllowNetwork", Rest] -> 
-                store_allownetwork(Rest);
-            ["DisallowNetwork", Rest] -> 
-                store_disallownetwork(Rest)
-        end
-    end, 
-    Configlines),
-
-    % set default values for unset parameters
-    load_default_config(),
+    ets:new(?MODULE, [named_table, set]),
+    lists:foreach(fun(CMD) -> store_ets(CMD) end, ?CONFIG_COMMANDS),
 
     % set logging settings
-    [{loglevel, LogLevel}] = ets:lookup(?MODULE, loglevel),
-    [{logfile, LogFile}] = ets:lookup(?MODULE, logfile),
+    LogLevel = lookup_ets(loglevel),
+    LogFile = lookup_ets(logfile),
     Config = #{config => #{file => LogFile}, level => LogLevel},
     logger:add_handler(myhandler, logger_std_h, Config),
 
-    % if auth required and auth file set, load credentials
-    case (auth_required()) and (ets:member(?MODULE, authfile)) of
-        true -> 
-            [{authfile, AuthFile}] = ets:member(?MODULE, authfile),
-            load_credentials(AuthFile);
-        _ -> ok
-    end,
-
     ok.
+
+
+set_env_if_unset(Key, Value) ->
+    case application:get_env(esocksd, Key) of
+        undefined -> application:set_env([{esocksd, [{Key, Value}]}]);
+        _ -> ok
+    end.
+
+store_ets(Key) -> 
+    {ok, Value} = application:get_env(esocksd, Key),
+    true = ets:insert(?MODULE, {Key, Value}).
+
+lookup_ets(Key) ->
+    [{Key, Value}] = ets:lookup(?MODULE, Key),
+    Value.
+
 
 % check if authentication required by config
 auth_required() ->
-    case ets:match_object(?MODULE, {authmethod, userpass}) of
-        [{authmethod, userpass}] -> true;
-        _ -> false
-    end.
+    userpass == lookup_ets(authmethod).
 
 % check if SOCKS command allowed by config
 command_allowed(Command) ->
-    case ets:match_object(?MODULE, {allowcommands, Command}) of
-        [{allowcommands, Command}] -> true;
-        _ -> false
-    end.
+    AllowedCommands = lookup_ets(allowcommands),
+    lists:member(Command, AllowedCommands).
 
 % check if address allowed to be connected to by config
 address_allowed(Address) ->
-    Inet = case tuple_size(Address) of
-        4 -> inet;
-        8 -> inet6
+    ACL = case tuple_size(Address) of
+        4 -> lookup_ets(networkacl);
+        8 -> lookup_ets(networkacl6)
     end,
-
-    % fetch rules by Inet
-    Rules = ets:match(?MODULE, {'$1', Inet, '$2', '$3'}),
 
     % go through rules one by one and see
     % if they allow or disallow accessing the Address
     Judgement = lists:foldl(
-        fun([Type, Network, NetworkBits], Acc) -> 
+        fun({Type, CIDR}, Acc) -> 
             case Acc of
                 notset ->
                     % Acc not yet set
                     % check if current rule catches it
+                    {Network, NetworkBits} = cidr_to_addr_and_fixedbits(CIDR),
                     case {Type, inet_utils:ip_between(Address, Network, NetworkBits)} of
-                        {allownetwork, true} -> true; % allow
-                        {disallownetwork, true} -> false; % disallow
+                        {allow, true} -> true; % allow
+                        {block, true} -> false; % disallow
                         _ -> notset % not caught by this rule
                     end;
                 _ ->
                     Acc % Acc has been set by previous rule
             end
     end,
-    notset, Rules),
+    notset, ACL),
 
     % return the value decided by rules
     case Judgement of
@@ -132,20 +110,19 @@ address_allowed(Address) ->
 
 % check if username and password combination is correct
 auth_credentials_correct(Username, Password) ->
-    case ets:match_object(?MODULE, {userpass, Username, Password}) of
-        [{userpass, Username, Password}] -> true;
-        _ -> false
-    end.
+    UserList = lookup_ets(userpass),
+    lists:member({Username, Password}, UserList).
 
 % get all address and port combinations the SOCKS server should listen on
 listen_addresses() ->
-    ListenAddresses = ets:lookup(?MODULE, listenaddress),
-    Ports = ets:lookup(?MODULE, port),
+    ListenAddresses = lookup_ets(listenaddress),
+    Ports = lookup_ets(port),
 
     % generate list of {ListenAddress, Port}
-    lists:flatmap(fun({listenaddress, Addr}) -> 
-        lists:map(fun({port, Port}) ->
-            {Addr, Port}
+    lists:flatmap(fun(Addr) -> 
+        lists:map(fun(Port) ->
+            {ok, AddrTuple} = inet:parse_address(Addr),
+            {AddrTuple, Port}
         end, Ports)
         end, 
     ListenAddresses).
@@ -153,119 +130,16 @@ listen_addresses() ->
 
 %%% helpers
 
-% {listenaddress, Listenaddress} - multiple
-store_listenaddress(ListenAddress) ->
-    % ListenAddress IPv4_addr|IPv6_addr
-    {ok, IPAddress} = inet:parse_address(ListenAddress),
-    true = ets:insert(?MODULE, {listenaddress, IPAddress}).
-
-% {port, Port} - multiple
-store_port(Port) ->
-    IntPort = list_to_integer(Port),
-    true = ets:insert(?MODULE, {port, IntPort}).
-
-% {loglevel, LogLevel}
-store_loglevel(LogLevel) ->
-    % verify allowed value
-    LogLevelAtom = list_to_atom(LogLevel),
-    true = lists:member(LogLevelAtom, ?LOG_LEVELS),
-    true = ets:insert(?MODULE, {loglevel, LogLevelAtom}).
-
-% {authmethod, AuthMethod}
-store_authmethod(AuthMethod) ->
-    % verify allowed value
-    AuthMethodAtom = list_to_atom(AuthMethod),
-    true = lists:member(AuthMethodAtom, ?AUTH_METHODS),
-    true = ets:insert(?MODULE, {authmethod, AuthMethodAtom}).
-
-% {allowcommands, Command} - multiple
-store_allowcommands(AllowCommands) ->
-    % verify allowed value for each
-    lists:foreach(fun(Elem) -> 
-        AllowCommandAtom = list_to_atom(Elem),
-        true = lists:member(AllowCommandAtom, ?COMMANDS),
-        true = ets:insert(?MODULE, {allowcommands, AllowCommandAtom})
-        end, 
-    AllowCommands).
-
-
-store_network(Network, AllowDisallow) ->
-    [Address, FixedBits] = string:split(Network, "/"),
+% convert cidr to {Address, Fixedbits}
+cidr_to_addr_and_fixedbits(CIDR) ->
+    [Address, FixedBits] = string:split(CIDR, "/"),
     {ok, AddrTuple} = inet:parse_address(Address),
     FixedBitsInt = list_to_integer(FixedBits),
     
     case tuple_size(AddrTuple) of
-        4 ->
-            % ipv4
-            true = (FixedBitsInt >= 0) and (FixedBitsInt =< 32),
-            true = ets:insert(?MODULE, {AllowDisallow, inet, AddrTuple, FixedBitsInt}),
-            ok;
-        8 ->
-            % ipv6
-            true = (FixedBitsInt >= 0) and (FixedBitsInt =< 128),
-            true = ets:insert(?MODULE, {AllowDisallow, inet6, AddrTuple, FixedBitsInt}),
-            ok
-    end.
+        4 -> true = (FixedBitsInt >= 0) and (FixedBitsInt =< 32); % ipv4
+        8 -> true = (FixedBitsInt >= 0) and (FixedBitsInt =< 128) % ipv6
+    end,
 
+    {AddrTuple, FixedBitsInt}.
 
-% {allownetwork, inet|inet6, IpTuple, NetworkBits} - multiple
-store_allownetwork(Network) ->
-   store_network(Network, allownetwork).
-
-% {disallownetwork, block, inet|inet6, IpTuple, NetworkBits} - multiple
-store_disallownetwork(Network) ->
-   store_network(Network, disallownetwork).
-
-
-
-% fill unset config values
-load_default_config() ->
-    lists:foreach(fun({Param, ValueList}) ->
-        case ets:member(?MODULE, Param) of
-            false ->
-                % param not set, set default value
-                lists:foreach(fun(Value) -> set_config(Param, Value) end, ValueList);
-            _ ->
-                ok
-            end
-        end,
-    ?DEFAULT_VALUES).
-
-
-% store value for parameter
-set_config(Param, Value) ->
-    case Param of
-        listenaddress -> store_listenaddress(Value);
-        port -> store_port(Value);
-        loglevel -> store_loglevel(Value);
-        logfile -> true = ets:insert(?MODULE, {logfile, Value});
-        authmethod -> store_authmethod(Value);
-        allowcommands -> store_allowcommands(Value);
-        allownetwork -> store_allownetwork(Value);
-        disallownetwork -> store_disallownetwork(Value)
-    end.
-
-
-% load credentials from authfile
-% expects credentials to be in format 
-%   username:password
-% {userpass, Username, Password} - multiple
-load_credentials(AuthFile) ->
-
-    {ok, Content} = file:read_file(AuthFile),
-    Parts = binary:split(Content, [<<"\n">>], [trim_all, global]),
-
-    % discard comments and empty lines 
-    Credlines = lists:filter(fun(X) -> 
-        (re:run(X, "^#") ==  nomatch) and
-        (re:run(X, "^\\h*$") == nomatch)
-    end, 
-    Parts),
-
-    % store creds to ets
-    lists:foreach(fun(Credline) ->  
-        [Username, Password] = re:split(Credline, ":", [trim, {return, list}]),
-        ets:insert({userpass, Username, Password})
-    end, Credlines),
-
-    ok.

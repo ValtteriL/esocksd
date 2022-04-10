@@ -1,5 +1,5 @@
 {application, esocksd,
- [{description, "An OTP application"},
+ [{description, "SOCKS proxy daemon"},
   {vsn, "0.1.0"},
   {registered, []},
   {mod, {esocksd_app, []}},
@@ -7,7 +7,25 @@
    [kernel,
     stdlib
    ]},
-  {env,[]},
+  {env,[
+        {listenaddress, ["0.0.0.0", "::"]}, 
+        {port, [1080]}, 
+        {loglevel, notice}, 
+        {logfile, "esocksd.log"}, 
+        {authmethod, none},
+        {allowcommands, [connect, bind, udp_associate]},
+        {networkacl, [
+            {allow, "0.0.0.0/0"},
+            {block, "255.255.255.255/31"}
+        ]},
+        {networkacl6, [
+            {allow, "::/0"}
+        ]},
+        {userpass, [
+            {"username", "password"},
+            {"admin", "secret"}
+        ]}
+    ]},
   {modules, []},
 
   {licenses, ["Apache 2.0"]},
