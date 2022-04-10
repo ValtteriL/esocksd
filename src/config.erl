@@ -83,13 +83,17 @@ load(Filename) ->
 
 % check if authentication required by config
 auth_required() ->
-    %TODO
-    false.
+    case ets:match_object(?MODULE, {authmethod, userpass}) of
+        [{authmethod, userpass}] -> true;
+        _ -> false
+    end.
 
 % check if SOCKS command allowed by config
 command_allowed(Command) ->
-    %TODO
-    false.
+    case ets:match_object(?MODULE, {allowcommands, Command}) of
+        [{allowcommands, Command}] -> true;
+        _ -> false
+    end.
 
 % check if address allowed to be connected to by config
 address_allowed(Address) ->
@@ -98,8 +102,10 @@ address_allowed(Address) ->
 
 % check if username and password combination is correct
 auth_credentials_correct(Username, Password) ->
-    %TODO
-    false.
+    case ets:match_object(?MODULE, {userpass, Username, Password}) of
+        [{userpass, Username, Password}] -> true;
+        _ -> false
+    end.
 
 % get all address and port combinations the SOCKS server should listen on
 listen_addresses() ->
