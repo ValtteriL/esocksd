@@ -97,8 +97,38 @@ command_allowed(Command) ->
 
 % check if address allowed to be connected to by config
 address_allowed(Address) ->
-    %TODO
-    false.
+    Inet = case tuple_size(Address) of
+        4 -> inet;
+        8 -> inet6
+    end,
+
+    % fetch rules by Inet
+    Rules = ets:match(?MODULE, {'$1', Inet, '$2', '$3'}),
+
+    % go through rules one by one and see
+    % if they allow or disallow accessing the Address
+    Judgement = lists:foldl(
+        fun([Type, Network, NetworkBits], Acc) -> 
+            case Acc of
+                notset ->
+                    % Acc not yet set
+                    % check if current rule catches it
+                    case {Type, inet_utils:ip_between(Address, Network, NetworkBits)} of
+                        {allownetwork, true} -> true; % allow
+                        {disallownetwork, true} -> false; % disallow
+                        _ -> notset % not caught by this rule
+                    end;
+                _ ->
+                    Acc % Acc has been set by previous rule
+            end
+    end,
+    notset, Rules),
+
+    % return the value decided by rules
+    case Judgement of
+        notset -> false; % by default, disallow access if config does not allow explicitly
+        _ -> Judgement
+    end.
 
 % check if username and password combination is correct
 auth_credentials_correct(Username, Password) ->
@@ -178,11 +208,11 @@ store_network(Network, AllowDisallow) ->
     end.
 
 
-% {network, allow, inet|inet6, IpTuple, NetworkBits} - multiple
+% {allownetwork, inet|inet6, IpTuple, NetworkBits} - multiple
 store_allownetwork(Network) ->
    store_network(Network, allownetwork).
 
-% {network, block, inet|inet6, IpTuple, NetworkBits} - multiple
+% {disallownetwork, block, inet|inet6, IpTuple, NetworkBits} - multiple
 store_disallownetwork(Network) ->
    store_network(Network, disallownetwork).
 
