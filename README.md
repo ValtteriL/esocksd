@@ -11,7 +11,7 @@ Build
 
 TODO
 -----
+- set parameters according to config file
 - SOCKS username+password auth
-- command line args
-- config file support
+- config file tests
 - unit tests  
