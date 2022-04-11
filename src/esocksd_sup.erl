@@ -29,23 +29,24 @@ init([{Address, Port}]) ->
 
     % restart = temporary, so a child process is never restarted
     SupFlags = #{strategy => simple_one_for_one, intensity => 1, period => 5},
-    ChildSpec = #{ id => worker, start => {socks_worker, start_link, [Listen]}, restart => temporary },
+    ChildSpecs = [#{ id => worker, start => {socks_worker, start_link, [self(), Listen]}, restart => temporary }],
 
     % create 5 worker processes
-    spawn_link(?MODULE, empty_listeners, [ChildSpec]),
+    spawn_link(?MODULE, empty_listeners, [self()]),
     
-    logger:notice("Listening for connections on ~p:~p", [Address, Port]),
+    AddressString = inet:ntoa(Address),
+    logger:notice("Listening for connections on ~s port ~B", [AddressString, Port]),
 
-    {ok, {SupFlags, [ChildSpec]}}.
+    {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions
-start_socket(ChildSpec) ->
-    supervisor:start_child(?SERVER, ChildSpec).
+start_socket(Pid) ->
+    {ok, _} = supervisor:start_child(Pid, []).
 
 %% Start with 5 listeners so that many multiple connections can
 %% be started at once, without serialization. In best circumstances,
 %% a process would keep the count active at all times to insure nothing
 %% bad happens over time when processes get killed too much.
-empty_listeners(ChildSpec) ->
-    [start_socket(ChildSpec) || _ <- lists:seq(1,5)],
+empty_listeners(Pid) ->
+    [start_socket(Pid) || _ <- lists:seq(1,5)],
     ok.

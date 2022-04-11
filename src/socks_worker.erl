@@ -3,18 +3,16 @@
 -include("socks5.hrl").
 -include("common.hrl").
 
--export([start_link/1]).
+-export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 
 
-start_link(Socket) ->
-    logger:emergency("WORKER STARTING"),
-    gen_server:start_link(?MODULE, [Socket], []).
+start_link(Supervisor, Socket) ->
+    gen_server:start_link(?MODULE, [Supervisor, Socket], []).
 
-init([Socket]) ->
-    logger:emergency("WORKER STARTING"),
+init([Supervisor, Socket]) ->
     gen_server:cast(self(), accept),
-    {ok, #state{socket=Socket}}.
+    {ok, #state{supervisor=Supervisor, socket=Socket}}.
 
 % handle start message from self
 handle_cast(accept, State) ->
@@ -23,7 +21,7 @@ handle_cast(accept, State) ->
     {ok, AcceptSocket} = gen_tcp:accept(State#state.socket),
     logger:debug("Worker: Accepted connection"),
 
-    esocksd_sup:start_socket(), % start a new listener to replace this one
+    esocksd_sup:start_socket(State#state.supervisor), % start a new listener to replace this one
     {noreply, #state{socket=AcceptSocket }};
 
 handle_cast(_, State) ->

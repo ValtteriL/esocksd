@@ -5,4 +5,4 @@
     connect, % CONNECT or BIND in place and connected - relay TCP traffic
     udp_associate % UDP ASSOCIATE in place - relay UDP traffic
 }).
--record(state, {socket, connectSocket, connectSocketIpv6, stage = #stage.handshake, udpClientIP, udpClientPort}).
+-record(state, {supervisor, socket, connectSocket, connectSocketIpv6, stage = #stage.handshake, udpClientIP, udpClientPort}).
