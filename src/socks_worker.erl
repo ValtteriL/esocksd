@@ -8,9 +8,11 @@
 
 
 start_link(Socket) ->
+    logger:emergency("WORKER STARTING"),
     gen_server:start_link(?MODULE, [Socket], []).
 
 init([Socket]) ->
+    logger:emergency("WORKER STARTING"),
     gen_server:cast(self(), accept),
     {ok, #state{socket=Socket}}.
 

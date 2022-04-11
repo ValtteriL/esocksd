@@ -11,7 +11,7 @@
 
 start(_StartType, _StartArgs) ->
     config:load(),
-    esocksd_sup:start_link().
+    esocksd_sup_sup:start_link().
 
 stop(_State) ->
     ok.
