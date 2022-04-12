@@ -16,7 +16,7 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 init([]) ->
-
+    config:load(),
     ListenAddresses = config:listen_addresses(),
 
     % start supervisor for each listenaddress
