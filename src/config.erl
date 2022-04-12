@@ -45,6 +45,7 @@ load() ->
     % set logging settings
     LogLevel = lookup_ets(loglevel),
     LogFile = lookup_ets(logfile),
+    logger:set_primary_config(level, LogLevel), % set loglevel globally
     Config = #{config => #{file => LogFile}, level => LogLevel},
     logger:add_handler(myhandler, logger_std_h, Config),
 
