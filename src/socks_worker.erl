@@ -36,11 +36,18 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
 
     <<VER, _/binary>> = Msg,
 
-    case VER of
-        4 ->
+    case {VER, config:auth_required()} of
+        {4, true} ->
+            % SOCKS4 attempted but authentication mandatory - close connection
+            gen_tcp:shutdown(Socket, write),
+            gen_tcp:close(Socket),
+            {stop, normal, State};
+        {4, false} ->
+            % SOCKS4
             logger:debug("Worker: SOCKS4 chosen"),
             socks4:negotiate(Msg, State); % SOCKS4 does not include handshake - go directly to negotiation
-        5 ->
+        {5, _} ->
+            % SOCKS5
             logger:debug("Worker: SOCKS5 chosen"),
             socks5:handshake(Msg, State)
     end;
