@@ -53,14 +53,14 @@ end_per_suite(Config) ->
 
 % Handshake with noauth succeeds
 handshake(_Config) ->
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
     ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
     {ok, Packet} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
     <<5, ?M_NOAUTH>> = Packet.
 
 % Handshake without methods fails
 handshake_without_methods(_Config) ->
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
     ok = gen_tcp:send(Socket, <<5, 0>>),
     {ok, Packet} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
     <<5, ?M_NOTAVAILABLE>> = Packet.
@@ -89,7 +89,7 @@ handshake_without_methods(_Config) ->
 do_handshake_noauth() ->
 
     % connect to SOCKS host and do handshake with NOAUTH
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
     ok = gen_tcp:send(Socket, ?HandshakeNoAuth),
     {ok, <<5, ?M_NOAUTH>>} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec),
     Socket.

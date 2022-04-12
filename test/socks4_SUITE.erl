@@ -53,7 +53,7 @@ connect_ipv4(Config) ->
     BinPort = helpers:integer_to_2byte_binary(?config(echoport, Config)),
 
     % request to CONNECT to the echo server on ipv4 address
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
 
     UserId = <<"dummy">>,
     ok = gen_tcp:send(Socket, <<4, ?CD_CONNECT, BinPort/binary, 127,0,0,1, UserId/binary, 0>>),
@@ -70,7 +70,7 @@ connect_domain_ipv4(Config) ->
 
     % get echoserver port in binary and do handshake with SOCKS server
     BinPort = helpers:integer_to_2byte_binary(?config(echoport, Config)),
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
 
     % request to CONNECT to the echo server on ipv4 address
     Domain = <<"localhost">>,
@@ -107,7 +107,7 @@ connect_domain_ipv4(Config) ->
 bind_ipv4(_Config) ->
 
     % request BIND
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
 
     UserId = <<"dummy">>,
     ok = gen_tcp:send(Socket, <<4, ?CD_BIND, 0,0, 127,0,0,1, UserId/binary, 0>>),
@@ -137,7 +137,7 @@ bind_ipv4(_Config) ->
 bind_domain(_Config) ->
     
     % do handshake with SOCKS server
-    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 9999, [{active, false}, binary]),
+    {ok, Socket} = gen_tcp:connect({127,0,0,1}, 1080, [{active, false}, binary]),
 
     Domain = <<"localhost">>,
     UserId = <<"dummy">>,
