@@ -86,18 +86,24 @@ negotiate(Msg, State) ->
 
     logger:debug("Worker: Received SOCKS request CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
 
-    case CMD of
+    Command = case CMD of
         ?CMD_CONNECT ->
-            logger:debug("Worker: CONNECT request received"),
-            connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+            logger:debug("Worker: CONNECT request received"), 
+            connect;
         ?CMD_BIND ->
-            logger:debug("Worker: BIND request received"),
-            bind(State);
+            logger:debug("Worker: BIND request received"), 
+            bind;
         ?CMD_UDP_ASSOCIATE ->
-            logger:debug("Worker: UDP ASSOCIATE request received"),
-            udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
-        _->
-            logger:info("Worker: Unsupported CMD received"),
+            logger:debug("Worker: UDP ASSOCIATE request received"), 
+            udp_associate
+    end,
+
+    case {Command, config:command_allowed(Command)} of
+        {connect, true} -> connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+        {bind, true} -> bind(State);
+        {udp_associate, true} -> udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+        {_, false} ->
+            logger:info("Worker: Command not allowed"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}

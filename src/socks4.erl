@@ -36,13 +36,23 @@ negotiate(Msg, State) ->
 
     Port = binary:decode_unsigned(DSTPORT),
 
-    case CD of
+    Command = case CD of
         ?CD_CONNECT ->
             logger:debug("Worker: SOCKS4 CONNECT request received"),
-            connect(DST_ADDR, Port, State);
+            connect;
         ?CD_BIND ->
             logger:debug("Worker: SOCKS4 BIND request received"),
-            bind(DST_ADDR, State)
+            bind
+    end,
+
+    case {Command, config:command_allowed(Command)} of
+        {connect, true} ->
+            logger:debug("Worker: SOCKS4 CONNECT request received"),
+            connect(DST_ADDR, Port, State);
+        {bind, true} ->
+            logger:debug("Worker: SOCKS4 BIND request received"),
+            bind(DST_ADDR, State);
+        {_, false} -> logger:info("Worker: SOCKS4 command not allowed")
     end.
 
 
