@@ -72,7 +72,7 @@ negotiate(Msg, State) ->
             {helpers:bytes_to_addr(DST), T};
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, DST_HOST:DOMAIN_LEN/binary, T/binary>> = Rest,
-            DST = binary_to_list(DST_HOST),
+            DST = resolve(binary_to_list(DST_HOST)),
             {DST, T};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
@@ -98,9 +98,17 @@ negotiate(Msg, State) ->
     end,
 
     case {Command, config:command_allowed(Command)} of
-        {connect, true} -> connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
         {bind, true} -> bind(State);
-        {udp_associate, true} -> udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+        {connect, true} ->
+            case config:address_allowed(DST_ADDR) of
+                true -> connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+                false -> close_network_disallowed(State)
+            end; 
+        {udp_associate, true} ->
+            case config:address_allowed(DST_ADDR) of
+                true -> udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+                false -> close_network_disallowed(State)
+            end; 
         {_, false} ->
             logger:info("Worker: Command not allowed"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
@@ -220,3 +228,18 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     % store the ListenSocket and used IP
     {noreply, State#state{stage=#stage.udp_associate, connectSocket=ListenSocketIpv4, connectSocketIpv6=ListenSocketIpv6, udpClientIP=UDPClient}}.
 
+
+%% helpers
+
+% close connection cleanly
+close_network_disallowed(State) ->
+    logger:info("Worker: Network not allowed"),
+    gen_tcp:send(State#state.socket, <<5, ?REP_CONNECTION_NOT_ALLOWED, ?RSV, ?REP_PADDING/binary>>),
+    gen_tcp:shutdown(State#state.socket, write),
+    gen_tcp:close(State#state.socket),
+    {stop, normal, State}.
+
+% resolve domain
+resolve(Domain) ->
+    {ok,{hostent,_,_,_,_,[Addr|_]}} = inet:gethostbyname(Domain), % resolve name to ipv4/ipv6 address
+    Addr.

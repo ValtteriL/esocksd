@@ -46,7 +46,15 @@ negotiate(Msg, State) ->
     end,
 
     case {Command, config:command_allowed(Command)} of
-        {connect, true} -> connect(DST_ADDR, Port, State);
+        {connect, true} ->
+            case config:address_allowed(DST_ADDR) of
+                true -> connect(DST_ADDR, Port, State);
+                false -> 
+                    gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),
+                    gen_tcp:shutdown(State#state.socket, write),
+                    gen_tcp:close(State#state.socket),
+                    {stop, normal, State}
+            end;  
         {bind, true} -> bind(DST_ADDR, State);
         {_, false} -> logger:info("Worker: SOCKS4 command not allowed")
     end.
@@ -140,3 +148,4 @@ bind(DST_ADDR, State) ->
             gen_tcp:close(ListenSocket),
             {stop, normal, State}
     end.
+
