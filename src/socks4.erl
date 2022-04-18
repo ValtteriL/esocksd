@@ -46,12 +46,8 @@ negotiate(Msg, State) ->
     end,
 
     case {Command, config:command_allowed(Command)} of
-        {connect, true} ->
-            logger:debug("Worker: SOCKS4 CONNECT request received"),
-            connect(DST_ADDR, Port, State);
-        {bind, true} ->
-            logger:debug("Worker: SOCKS4 BIND request received"),
-            bind(DST_ADDR, State);
+        {connect, true} -> connect(DST_ADDR, Port, State);
+        {bind, true} -> bind(DST_ADDR, State);
         {_, false} -> logger:info("Worker: SOCKS4 command not allowed")
     end.
 
