@@ -51,6 +51,9 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
             logger:debug("Worker: SOCKS5 chosen"),
             socks5:handshake(Msg, State)
     end;
+handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.authenticate}) ->
+    ok = inet:setopts(Socket, [{active, once}]),
+    socks5:authenticate(Msg, State);
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
     ok = inet:setopts(Socket, [{active, once}]),
     socks5:negotiate(Msg, State);

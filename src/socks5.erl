@@ -2,7 +2,7 @@
 -include("socks5.hrl").
 -include("common.hrl").
 
--export([handshake/2, negotiate/2]).
+-export([handshake/2, authenticate/2, negotiate/2]).
 
 % SOCKS5 + SOCKS5H related functions
 % followed documents: 
@@ -14,17 +14,51 @@ handshake(Msg, State) ->
 
     ListMETHODS = binary:bin_to_list(METHODS),
 
-    % check version and proposed auth method
-    case lists:member(?M_NOAUTH, ListMETHODS)  of
-        true ->
+    UserPassProposed = lists:member(?M_USERPASS, ListMETHODS),
+    NoAuthProposed = lists:member(?M_NOAUTH, ListMETHODS),
+
+    % if authentication required, check that client proposes it
+    case {config:auth_required(), UserPassProposed, NoAuthProposed } of
+        {true, true, _} ->
+            % choose M_USERPASS method, and move to authentication stage
+            logger:debug("Worker: Supported SOCKS version and method found (userpass)"),
+            gen_tcp:send(State#state.socket, <<5, ?M_USERPASS>>),
+            {noreply, State#state{stage=#stage.authenticate}};
+        {false, _, true} ->
             % choose M_NOAUTH method, and move to next stage
-            logger:debug("Worker: Supported SOCKS version and method found"),
+            logger:debug("Worker: Supported SOCKS version and method found (noauth)"),
             gen_tcp:send(State#state.socket, <<5, ?M_NOAUTH>>),
             {noreply, State#state{stage=#stage.request}};
         _ -> 
             % reply no, end connection, and terminate worker
             logger:info("Worker: Unsupported auth method proposed"),
             gen_tcp:send(State#state.socket, <<5, ?M_NOTAVAILABLE>>),
+            gen_tcp:shutdown(State#state.socket, write),
+            {stop, normal, State}
+    end.
+
+authenticate(Msg, State) ->
+    % +----+------+----------+------+----------+
+    % |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
+    % +----+------+----------+------+----------+
+    % | 1  |  1   | 1 to 255 |  1   | 1 to 255 |
+    % +----+------+----------+------+----------+
+    <<1, ULEN, UNAME:ULEN/binary, PLEN, PASSWD:PLEN/binary>> = Msg,
+
+    % +----+--------+
+    % |VER | STATUS |
+    % +----+--------+
+    % | 1  |   1    |
+    %+----+--------+
+    case config:auth_credentials_correct(UNAME, PASSWD) of
+        true ->
+            % valid creds: continue to request state
+            gen_tcp:send(State#state.socket, <<5, ?USERPASS_STATUS_SUCCESS>>),
+            {noreply, State#state{stage=#stage.request}};
+        _ ->
+            % invalid creds: end connection and terminate worker
+            logger:info("Worker: Unsupported auth method proposed"),
+            gen_tcp:send(State#state.socket, <<5, ?USERPASS_STATUS_FAILURE>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end.

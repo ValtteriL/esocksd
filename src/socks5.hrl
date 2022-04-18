@@ -32,3 +32,7 @@
 
 -define(HOST_ALLIFACES, <<0,0,0,0>>).
 -define(HOST_NOPORTS, <<0,0>>).
+
+% password auth specific
+-define(USERPASS_STATUS_SUCCESS, 0).
+-define(USERPASS_STATUS_FAILURE, 1).
