@@ -71,8 +71,7 @@ negotiate(Msg, State) ->
             <<DST:4/binary, T/binary>> = Rest,
             {helpers:bytes_to_addr(DST), T};
         ?ATYP_DOMAINNAME ->
-            <<DOMAIN_LEN, T1/binary>> = Rest,
-            <<DST_HOST:DOMAIN_LEN/binary, T/binary>> = T1,
+            <<DOMAIN_LEN, DST_HOST:DOMAIN_LEN/binary, T/binary>> = Rest,
             DST = binary_to_list(DST_HOST),
             {DST, T};
         ?ATYP_IPV6 ->
