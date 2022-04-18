@@ -20,7 +20,7 @@ all() -> [handshake, handshake_without_methods, connect_ipv4, connect_ipv6, conn
 init_per_suite(Config) ->
     {ok, App} = esocksd_app:start(does, notmatter),
     unlink(App), % unlink App to keep it running
-    EchoPort = spawn_echoserver(), % spawn echo server for tests
+    EchoPort = test_helpers:spawn_echoserver(), % spawn echo server for tests
     [{echoport, EchoPort},{app, App}| Config].
 
 % stop service
@@ -405,38 +405,3 @@ udpassociate_domain(_Config) ->
     {ok, {_Address, _Port, HdrMsg2}} = gen_udp:recv(ClientUdpSocket, 0, ?TimeoutMilliSec),
     <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV4, _RemoteAddrBytes:4/binary, OwnPortBytes:2/binary, Msg/binary>> = HdrMsg2.
 
-
-
-%%% Helpers
-
-% spawn echo server on Port for testing purposes
-spawn_echoserver() ->
-    % ipv4
-    {ok, ListenSocket} = gen_tcp:listen(0, [binary, inet, {reuseaddr, true}]),
-    Handler = spawn(fun() -> 
-        server_loop(ListenSocket)
-    end),
-    gen_tcp:controlling_process(ListenSocket, Handler),
-    {ok, Port} = inet:port(ListenSocket),
-
-    % ipv6
-    {ok, ListenSocket2} = gen_tcp:listen(Port, [binary, inet6, {reuseaddr, true}]),
-    Handler2 = spawn(fun() -> 
-        server_loop(ListenSocket2)
-    end),
-    gen_tcp:controlling_process(ListenSocket2, Handler2),
-
-    Port.
-
-server_loop(Socket) ->
-    {ok, Connection} = gen_tcp:accept(Socket),
-    Handler = spawn(fun () -> echo_loop(Connection) end),
-    gen_tcp:controlling_process(Connection, Handler),
-    server_loop(Socket).
-
-echo_loop(Connection) ->
-    receive
-        {tcp, Connection, Data} ->
-	        gen_tcp:send(Connection, Data),
-	        echo_loop(Connection)
-    end.
