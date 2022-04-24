@@ -70,78 +70,8 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectSocket
 handle_info({tcp_closed, _Socket}, State) -> {stop, normal, State};
 handle_info({tcp_error, _Socket, _}, State) -> {stop, normal, State};
 
-% UDP port receives data with header
-% UDP port receives data without header
-handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_associate}) ->
-
-    ok = inet:setopts(Socket, [{active, once}]),
-    logger:debug("Worker (in UDP ASSOCIATE): passing UDP data"),
-
-    % expect encapsulated traffic from client
-    case ((IP == State#state.udpClientIP) and ((InPortNo == State#state.udpClientPort) or (State#state.udpClientPort==undefined))) of
-        true ->
-            logger:debug("Worker (in UDP ASSOCIATE): client sends UDP traffic to DST"),
-            % client sent this (store the Port)
-            <<?RSV, ?RSV, ?UDP_FRAG,  ATYP, Rest/binary>> = Msg,
-            {DST_ADDR, DST_PORT, Data} = case ATYP of
-                ?ATYP_IPV4 ->
-                    <<DST:4/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {helpers:bytes_to_addr(DST), T, Datagram};
-                ?ATYP_DOMAINNAME ->
-                    <<DOMAIN_LEN, T1/binary>> = Rest,
-                    <<DST_HOST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
-                    DST = binary_to_list(DST_HOST),
-                    {helpers:resolve(DST), T, Datagram};
-                ?ATYP_IPV6 ->
-                    <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {helpers:bytes_to_addr(DST), T, Datagram}
-            end,
-
-            % relay Data to the destination if address allowed
-            % otherwise drop
-            AddrAllowed = config:address_allowed(DST_ADDR),
-            case {AddrAllowed, ATYP} of
-                {true, ?ATYP_IPV6 } -> 
-                    ok = gen_udp:send(State#state.connectSocketIpv6, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
-                {true, _} -> 
-                    ok = gen_udp:send(State#state.connectSocket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
-                {false, _} -> 
-                    logger:notice("Worker (in UDP ASSOCIATE): dropping traffic destined to disallowed address")
-            end,
-
-            {noreply, State#state{udpClientPort=InPortNo}};
-        _->
-
-            logger:debug("Worker (in UDP ASSOCIATE): DST sends UDP traffic to client"),
-            
-            % this is reply from the destination host
-            
-            case config:address_allowed(IP) of
-                true -> 
-                    % prepend header and send to client
-            
-                    RemoteAddrBytes = helpers:addr_to_bytes(IP),
-                    RemotePortBytes = helpers:integer_to_2byte_binary(InPortNo),
-
-                    % get type of address
-                    ATYP = helpers:bytes_to_atyp(RemoteAddrBytes),
-
-                    Data = <<?UDP_RSV/binary, ?UDP_FRAG, ATYP, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg/binary>>,
-
-                    % relay Data to client using suitable socket
-                    % if the destination IP is itself allowed
-                    case tuple_size(State#state.udpClientIP) of
-                        4 -> 
-                            ok = gen_udp:send(State#state.connectSocket, State#state.udpClientIP, State#state.udpClientPort, Data);
-                        _ ->
-                            ok = gen_udp:send(State#state.connectSocketIpv6, State#state.udpClientIP, State#state.udpClientPort, Data)
-                    end;
-                false -> logger:notice("Worker (in UDP ASSOCIATE): dropping traffic from disallowed address")
-            end,
-
-            {noreply, State}
-    end;
-
+handle_info(Message = {udp, _Socket, _IP, _InPortNo, _Msg}, State=#state{stage=#stage.udp_associate}) ->
+    socks5:udp_associate_relay(Message, State);
 
 handle_info(E, State) ->
     logger:warning("UNEXPECTED: ~p", [E]),
