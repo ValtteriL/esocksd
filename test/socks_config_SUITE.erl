@@ -79,6 +79,7 @@ init_per_suite(Config) ->
 % stop service
 end_per_suite(Config) ->
     ok = application:stop(esocksd),
+    ok = application:unload(esocksd),
     Config.
 
 do_handshake_userpass() ->

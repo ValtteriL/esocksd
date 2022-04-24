@@ -15,15 +15,16 @@ all() -> [connect_ipv4, connect_domain_ipv4, bind_ipv4, bind_domain].
 
 % start service
 init_per_suite(Config) ->
-    {ok, App} = esocksd_app:start(does, notmatter),
-    unlink(App), % unlink App to keep it running
+    ok = application:load(esocksd),
+    ok = application:start(esocksd),
+
     EchoPort = test_helpers:spawn_echoserver(), % spawn echo server for tests
-    [{echoport, EchoPort},{app, App}| Config].
+    [{echoport, EchoPort}| Config].
 
 % stop service
 end_per_suite(Config) ->
-    App = ?config(app, Config),
-    exit(App, normal),
+    ok = application:stop(esocksd),
+    ok = application:unload(esocksd),
     Config.
 
 
