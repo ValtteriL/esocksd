@@ -7,6 +7,7 @@
 % SOCKS5 + SOCKS5H related functions
 % followed documents: 
 % - https://datatracker.ietf.org/doc/html/rfc1928
+% - https://datatracker.ietf.org/doc/html/rfc1929
 
 handshake(Msg, State) ->
     <<5, NMETHODS, METHODS/binary>> = Msg,
