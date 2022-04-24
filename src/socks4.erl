@@ -27,7 +27,7 @@ negotiate(Msg, State) ->
             logger:debug("Worker: SOCKS4A domain received"),
             false = (X == 0),
             [_, Domain, _] = binary:split(Rest, <<0>>, [global]),
-            {ok,{hostent,_,_,inet,4,[Addr|_]}} = inet:gethostbyname(binary_to_list(Domain)), % resolve name to ipv4 address
+            Addr = helpers:resolve(binary_to_list(Domain)), % resolve name to ipv4 address
             Addr;
         _->
             % SOCKS4 request
