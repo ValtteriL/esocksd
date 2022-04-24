@@ -97,37 +97,47 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
                     {helpers:bytes_to_addr(DST), T, Datagram}
             end,
 
-            % relay Data to the destination
-            case ATYP of
-                ?ATYP_IPV6 ->
+            % relay Data to the destination if address allowed
+            % otherwise drop
+            case {config:address_allowed(DST_ADDR), ATYP} of
+                {true, ?ATYP_IPV6 } -> 
                     ok = gen_udp:send(State#state.connectSocketIpv6, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
-                _ ->
-                    ok = gen_udp:send(State#state.connectSocket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data)
+                {true, _} -> 
+                    ok = gen_udp:send(State#state.connectSocket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
+                {false, _} -> 
+                    logger:notice("Worker (in UDP ASSOCIATE): dropping traffic destined to disallowed address")
             end,
 
             {noreply, State#state{udpClientPort=InPortNo}};
         _->
 
             logger:debug("Worker (in UDP ASSOCIATE): DST sends UDP traffic to client"),
+            
             % this is reply from the destination host
-            % prepend header and send to client
             
-            RemoteAddrBytes = helpers:addr_to_bytes(IP),
-            RemotePortBytes = helpers:integer_to_2byte_binary(InPortNo),
+            case config:address_allowed(IP) of
+                true -> 
+                    % prepend header and send to client
+            
+                    RemoteAddrBytes = helpers:addr_to_bytes(IP),
+                    RemotePortBytes = helpers:integer_to_2byte_binary(InPortNo),
 
-            % get type of address
-            ATYP = helpers:bytes_to_atyp(RemoteAddrBytes),
+                    % get type of address
+                    ATYP = helpers:bytes_to_atyp(RemoteAddrBytes),
 
-            Data = <<?UDP_RSV/binary, ?UDP_FRAG, ATYP, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg/binary>>,
+                    Data = <<?UDP_RSV/binary, ?UDP_FRAG, ATYP, RemoteAddrBytes/binary, RemotePortBytes/binary, Msg/binary>>,
 
-            % send Data to client using suitable socket
-            case tuple_size(State#state.udpClientIP) of
-                4 -> 
-                    ok = gen_udp:send(State#state.connectSocket, State#state.udpClientIP, State#state.udpClientPort, Data);
-                _ ->
-                    ok = gen_udp:send(State#state.connectSocketIpv6, State#state.udpClientIP, State#state.udpClientPort, Data)
+                    % relay Data to client using suitable socket
+                    % if the destination IP is itself allowed
+                    case tuple_size(State#state.udpClientIP) of
+                        4 -> 
+                            ok = gen_udp:send(State#state.connectSocket, State#state.udpClientIP, State#state.udpClientPort, Data);
+                        _ ->
+                            ok = gen_udp:send(State#state.connectSocketIpv6, State#state.udpClientIP, State#state.udpClientPort, Data)
+                    end;
+                false -> logger:notice("Worker (in UDP ASSOCIATE): dropping traffic from disallowed address")
             end,
-            
+
             {noreply, State}
     end;
 

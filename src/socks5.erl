@@ -115,6 +115,9 @@ negotiate(Msg, State) ->
                 _-> false
             end,
 
+            % block if client intends to use disallowed IP
+            % as the source
+
             case config:address_allowed(DST_ADDR) or AddrUnknown of
                 true -> udp_associate(DST_ADDR, DST_PORT, State);
                 false -> close_network_disallowed(State)
