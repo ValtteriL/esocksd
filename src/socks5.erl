@@ -192,9 +192,20 @@ bind(State) ->
 
             logger:info("Worker: Connection received from ~p:~B!", [RemoteAddr, RemotePort]),
 
-            % communicate the received connection and peer details
-            gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
-            {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
+            case config:address_allowed(RemoteAddr) of
+                true ->
+                    % communicate the received connection and peer details
+                    gen_tcp:send(State#state.socket, <<5, ?REP_SUCCESS, ?RSV, ?ATYP_IPV4, RemoteAddrBytes/binary, RemotePortBytes/binary>>),
+                    {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
+                false -> 
+                    % received connection from disallowed host - communicate error
+                    logger:info("Worker (in BIND): Accepted connection from disallowed host"),
+                    gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV, ?REP_PADDING/binary>>),
+                    gen_tcp:shutdown(State#state.socket, write),
+                    gen_tcp:close(ListenSocket),
+                    gen_tcp:close(Socket),
+                    {stop, normal, State}
+            end;
         {error, _} ->
 
             logger:info("Worker (in BIND): Error accepting connection"),
