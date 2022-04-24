@@ -11,5 +11,4 @@ Build
 
 TODO
 -----
-- config file tests
 - unit tests  
