@@ -75,7 +75,7 @@ negotiate(Msg, State) ->
             {helpers:bytes_to_addr(DST), binary:decode_unsigned(T)};
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, DST_HOST:DOMAIN_LEN/binary, T/binary>> = Rest,
-            DST = resolve(binary_to_list(DST_HOST)),
+            DST = helpers:resolve(binary_to_list(DST_HOST)),
             {DST, binary:decode_unsigned(T)};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
@@ -262,8 +262,3 @@ close_network_disallowed(State) ->
     gen_tcp:shutdown(State#state.socket, write),
     gen_tcp:close(State#state.socket),
     {stop, normal, State}.
-
-% resolve domain
-resolve(Domain) ->
-    {ok,{hostent,_,_,_,_,[Addr|_]}} = inet:gethostbyname(Domain), % resolve name to ipv4/ipv6 address
-    Addr.

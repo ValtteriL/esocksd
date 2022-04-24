@@ -91,7 +91,7 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
                     <<DOMAIN_LEN, T1/binary>> = Rest,
                     <<DST_HOST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
                     DST = binary_to_list(DST_HOST),
-                    {DST, T, Datagram};
+                    {helpers:resolve(DST), T, Datagram};
                 ?ATYP_IPV6 ->
                     <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
                     {helpers:bytes_to_addr(DST), T, Datagram}
@@ -99,7 +99,8 @@ handle_info({udp, Socket, IP, InPortNo, Msg}, State=#state{stage=#stage.udp_asso
 
             % relay Data to the destination if address allowed
             % otherwise drop
-            case {config:address_allowed(DST_ADDR), ATYP} of
+            AddrAllowed = config:address_allowed(DST_ADDR),
+            case {AddrAllowed, ATYP} of
                 {true, ?ATYP_IPV6 } -> 
                     ok = gen_udp:send(State#state.connectSocketIpv6, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
                 {true, _} -> 

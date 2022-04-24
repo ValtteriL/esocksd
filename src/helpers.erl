@@ -1,7 +1,7 @@
 -module(helpers).
 -include("socks5.hrl").
 
--export([bytes_to_addr/1, addr_to_bytes/1, integer_to_2byte_binary/1, bytes_to_atyp/1]).
+-export([bytes_to_addr/1, addr_to_bytes/1, integer_to_2byte_binary/1, bytes_to_atyp/1, resolve/1]).
 
 % convert bytes into tuple representation of IP address (tuple)
 bytes_to_addr(Bytes) ->
@@ -44,3 +44,9 @@ bytes_to_atyp(Bytes) ->
         _ ->
             ?ATYP_DOMAINNAME
     end.
+
+
+% resolve domain
+resolve(Domain) ->
+    {ok,{hostent,_,_,_,_,[Addr|_]}} = inet:gethostbyname(Domain), % resolve name to ipv4/ipv6 address
+    Addr.
