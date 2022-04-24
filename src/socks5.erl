@@ -45,20 +45,23 @@ authenticate(Msg, State) ->
     % +----+------+----------+------+----------+
     <<1, ULEN, UNAME:ULEN/binary, PLEN, PASSWD:PLEN/binary>> = Msg,
 
+    Username = binary_to_list(UNAME),
+    Password = binary_to_list(PASSWD),
+
     % +----+--------+
     % |VER | STATUS |
     % +----+--------+
     % | 1  |   1    |
     %+----+--------+
-    case config:auth_credentials_correct(UNAME, PASSWD) of
+    case config:auth_credentials_correct(Username, Password) of
         true ->
             % valid creds: continue to request state
-            gen_tcp:send(State#state.socket, <<5, ?USERPASS_STATUS_SUCCESS>>),
+            gen_tcp:send(State#state.socket, <<1, ?USERPASS_STATUS_SUCCESS>>),
             {noreply, State#state{stage=#stage.request}};
         _ ->
             % invalid creds: end connection and terminate worker
-            logger:info("Worker: Unsupported auth method proposed"),
-            gen_tcp:send(State#state.socket, <<5, ?USERPASS_STATUS_FAILURE>>),
+            logger:info("Worker: Invalid credentials"),
+            gen_tcp:send(State#state.socket, <<1, ?USERPASS_STATUS_FAILURE>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
     end.
@@ -69,21 +72,21 @@ negotiate(Msg, State) ->
     {DST_ADDR, DST_PORT} = case ATYP of
         ?ATYP_IPV4 ->
             <<DST:4/binary, T/binary>> = Rest,
-            {helpers:bytes_to_addr(DST), T};
+            {helpers:bytes_to_addr(DST), binary:decode_unsigned(T)};
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, DST_HOST:DOMAIN_LEN/binary, T/binary>> = Rest,
             DST = resolve(binary_to_list(DST_HOST)),
-            {DST, T};
+            {DST, binary:decode_unsigned(T)};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
-            {helpers:bytes_to_addr(DST), T};
+            {helpers:bytes_to_addr(DST), binary:decode_unsigned(T)};
         _ ->
             logger:info("Worker: Unsupported ATYP reveived"),
             gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write)
     end,
 
-    logger:debug("Worker: Received SOCKS request CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, binary:decode_unsigned(DST_PORT)]),
+    logger:debug("Worker: Received SOCKS request CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, DST_PORT]),
 
     Command = case CMD of
         ?CMD_CONNECT ->
@@ -101,12 +104,19 @@ negotiate(Msg, State) ->
         {bind, true} -> bind(State);
         {connect, true} ->
             case config:address_allowed(DST_ADDR) of
-                true -> connect(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+                true -> connect(DST_ADDR, DST_PORT, State);
                 false -> close_network_disallowed(State)
             end; 
         {udp_associate, true} ->
-            case config:address_allowed(DST_ADDR) of
-                true -> udp_associate(DST_ADDR, binary:decode_unsigned(DST_PORT), State);
+
+            AddrUnknown = case {DST_ADDR,  DST_PORT} of
+                {{0,0,0,0}, 0} -> true;
+                {{0,0,0,0,0,0,0,0}, 0} -> true;
+                _-> false
+            end,
+
+            case config:address_allowed(DST_ADDR) or AddrUnknown of
+                true -> udp_associate(DST_ADDR, DST_PORT, State);
                 false -> close_network_disallowed(State)
             end; 
         {_, false} ->
