@@ -45,18 +45,22 @@ negotiate(Msg, State) ->
             bind
     end,
 
-    case {Command, config:command_allowed(Command)} of
-        {connect, true} ->
-            case config:address_allowed(DST_ADDR) of
-                true -> connect(DST_ADDR, Port, State);
-                false -> 
-                    gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),
-                    gen_tcp:shutdown(State#state.socket, write),
-                    gen_tcp:close(State#state.socket),
-                    {stop, normal, State}
-            end;  
-        {bind, true} -> bind(DST_ADDR, State);
-        {_, false} -> logger:info("Worker: SOCKS4 command not allowed")
+    case {Command, config:command_allowed(Command), config:address_allowed(DST_ADDR)} of
+        {connect, true, true} -> connect(DST_ADDR, Port, State);
+        {bind, true, true} -> bind(DST_ADDR, State);
+        {_, CmdAllowed, AddrAllowed} -> 
+            case CmdAllowed of
+                false -> logger:notice("Worker: SOCKS4 command not allowed");
+                _ -> ok
+            end,
+            case AddrAllowed of
+                false -> logger:notice("Worker: destination address not allowed");
+                _ -> ok
+            end,
+            gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),
+            gen_tcp:shutdown(State#state.socket, write),
+            gen_tcp:close(State#state.socket),
+            {stop, normal, State}
     end.
 
 
