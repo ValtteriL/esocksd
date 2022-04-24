@@ -43,6 +43,7 @@ all() -> [listenaddress_port_logfile,
 -define(HostTuple, {127,0,0,2}).
 -define(Username, "user").
 -define(Password, "secret").
+-define(Filename, "test-esocksd.log").
 
 
 % start service
@@ -53,7 +54,7 @@ init_per_suite(Config) ->
         {listenaddress, [?Host]}, 
         {port, [?Port]}, 
         {loglevel, debug}, 
-        {logfile, "test-esocksd.log"}, 
+        {logfile, ?Filename}, 
         {authmethod, userpass},
         {allowcommands, [connect, udp_associate]},
         {networkacl, [
@@ -118,7 +119,7 @@ listenaddress_port_logfile(_Config) ->
     {ok, _Socket} = do_handshake_userpass(),
 
     % check that logfile exists
-    {ok, _} = file:open("test-esocksd.log", [read]).
+    {ok, _} = file:open(?Filename, [read]).
 
 
 %%%%%%%%
