@@ -187,8 +187,6 @@ networkacl_disallowed_fail_connect(_Config) ->
     ok = gen_tcp:send(Socket, <<5, ?CMD_CONNECT, ?RSV, ?ATYP_IPV4, 8,8,8,8, 53>>),
     {ok, ?ReplyDisallowed} = gen_tcp:recv(Socket, 0, ?TimeoutMilliSec).
 
-networkacl_disallowed_fail_bind_socks5(_Config) -> ok.
-
 networkacl_disallowed_fail_udp_associate_known(_Config) -> 
     {ok, Socket} = do_handshake_userpass(),
     {ok, success} = do_auth(Socket, ?Username, ?Password),
