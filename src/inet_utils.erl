@@ -32,12 +32,13 @@ inet_aton(Ip) ->
 %% range. E.g: ip_between({192,168,0,10}, {192.168.0.0}, 24).
 -spec ip_between(tuple, tuple, pos_integer()) -> boolean().
 ip_between(Ip, Network, NetworkBits) ->
-  IpNum = inet_aton(Ip),
-  NetLow = inet_aton(Network),
-  BitsHosts = case tuple_size(Ip) of
-      4 -> 32 - NetworkBits;
-      8 -> 128 - NetworkBits
+    IpNum = inet_aton(Ip),
+    BitsHosts = case tuple_size(Ip) of
+        4 -> 32 - NetworkBits;
+        8 -> 128 - NetworkBits
     end,
-  NetHigh = NetLow + erlang:trunc(math:pow(2, BitsHosts)) - 1,
-  IpNum >= NetLow andalso IpNum =< NetHigh.
+
+    NetLow = inet_aton(Network) bsr BitsHosts bsl BitsHosts,
+    NetHigh = NetLow + erlang:trunc(math:pow(2, BitsHosts)) - 1,
+    IpNum >= NetLow andalso IpNum =< NetHigh.
 
