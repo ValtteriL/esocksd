@@ -367,7 +367,7 @@ udpassociate_ipv6(_Config) ->
 
     % receive the msg at client side (with headers)
     {ok, {_Address2, _Port2, HdrMsg2}} = gen_udp:recv(ClientUdpSocket, 0, ?TimeoutMilliSec),
-    <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV6, _RemoteAddrBytes:8/binary, OwnPortBytes:2/binary, Msg/binary>> = HdrMsg2.
+    <<?RSV, ?RSV, ?UDP_FRAG, ?ATYP_IPV6, _RemoteAddrBytes:16/binary, OwnPortBytes:2/binary, Msg/binary>> = HdrMsg2.
 
 % udp associate works when domain address in request
 udpassociate_domain(_Config) ->

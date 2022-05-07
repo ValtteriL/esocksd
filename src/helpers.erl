@@ -13,8 +13,14 @@ bytes_to_addr(Bytes) ->
             bytes_to_ipv6_addr(Bytes)
     end.
 
-addr_to_bytes(Addr) ->
-    binary:list_to_bin(tuple_to_list(Addr)).
+addr_to_bytes(Addr) when tuple_size(Addr) == 4 ->
+    binary:list_to_bin(tuple_to_list(Addr));
+addr_to_bytes(Addr) when tuple_size(Addr) == 8 ->
+    List = tuple_to_list(Addr),
+    BinaryList = lists:map(fun(Integer) -> integer_to_2byte_binary(Integer) end, List),
+    binary:list_to_bin(BinaryList).
+
+
 
 bytes_to_ipv6_addr(Bytes) ->
     bytes_to_ipv6_addr([], Bytes).
@@ -34,12 +40,12 @@ integer_to_2byte_binary(Integer) ->
     end.
 
 
-% figre address type by bytes
+% given IP address bytes figure address type by bytes
 bytes_to_atyp(Bytes) ->
     case byte_size(Bytes) of
         4 ->
             ?ATYP_IPV4;
-        8 ->
+        16 ->
             ?ATYP_IPV6;
         _ ->
             ?ATYP_DOMAINNAME
