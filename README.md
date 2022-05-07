@@ -11,7 +11,6 @@ Build
 
 TODO
 -----
-- unit tests
 - spec
 - type
 - readme
