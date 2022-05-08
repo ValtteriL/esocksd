@@ -25,6 +25,7 @@
 -define(CONFIG_COMMANDS, [listenaddress, port, loglevel, logfile, authmethod, userpass, allowcommands, networkacl, networkacl6]).
 
 % load configuration
+-spec load() -> ok.
 load() ->
     
     % use default config for unset values
@@ -68,15 +69,18 @@ lookup_ets(Key) ->
 
 
 % check if authentication required by config
+-spec auth_required() -> boolean().
 auth_required() ->
     userpass == lookup_ets(authmethod).
 
 % check if SOCKS command allowed by config
+-spec command_allowed(atom()) -> boolean().
 command_allowed(Command) ->
     AllowedCommands = lookup_ets(allowcommands),
     lists:member(Command, AllowedCommands).
 
 % check if address allowed to be connected to by config
+-spec address_allowed(tuple()) -> boolean().
 address_allowed(Address) ->
     ACL = case tuple_size(Address) of
         4 -> lookup_ets(networkacl);
@@ -110,11 +114,13 @@ address_allowed(Address) ->
     end.
 
 % check if username and password combination is correct
+-spec auth_credentials_correct(string(), string()) -> boolean().
 auth_credentials_correct(Username, Password) ->
     UserList = lookup_ets(userpass),
     lists:member({Username, Password}, UserList).
 
 % get all address and port combinations the SOCKS server should listen on
+-spec listen_addresses() -> list().
 listen_addresses() ->
     ListenAddresses = lookup_ets(listenaddress),
     Ports = lookup_ets(port),
