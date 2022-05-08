@@ -5,7 +5,7 @@
 
 %% @doc Converts tuple with a human readable ip
 %% address representation into an uint32.
--spec inet_aton(tuple) -> pos_integer().
+-spec inet_aton(tuple()) -> pos_integer().
 inet_aton(Ip) ->
     case Ip of
         {O1Bin, O2Bin, O3Bin, O4Bin} ->
@@ -30,7 +30,7 @@ inet_aton(Ip) ->
 
 %% @doc Checks if the given IP address falls into the given network
 %% range. E.g: ip_between({192,168,0,10}, {192.168.0.0}, 24).
--spec ip_between(tuple, tuple, pos_integer()) -> boolean().
+-spec ip_between(tuple(), tuple(), pos_integer()) -> boolean().
 ip_between(Ip, Network, NetworkBits) ->
     IpNum = inet_aton(Ip),
     BitsHosts = case tuple_size(Ip) of

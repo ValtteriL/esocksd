@@ -120,7 +120,8 @@ auth_credentials_correct(Username, Password) ->
     lists:member({Username, Password}, UserList).
 
 % get all address and port combinations the SOCKS server should listen on
--spec listen_addresses() -> list().
+-type listen_addr_list() :: [{tuple(), integer()}].
+-spec listen_addresses() -> listen_addr_list().
 listen_addresses() ->
     ListenAddresses = lookup_ets(listenaddress),
     Ports = lookup_ets(port),
