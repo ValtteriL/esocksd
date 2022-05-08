@@ -9,7 +9,7 @@
 % - https://www.openssh.com/txt/socks4.protocol
 % - https://www.openssh.com/txt/socks4a.protocol
 
-
+-spec negotiate(binary(), tuple()) -> tuple().
 negotiate(Msg, State) ->
     
     <<4, CD, DSTPORT:2/binary, DSTIP:4/binary, Rest/binary>> = Msg,
