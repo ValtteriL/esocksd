@@ -9,7 +9,7 @@
 % - https://datatracker.ietf.org/doc/html/rfc1928
 % - https://datatracker.ietf.org/doc/html/rfc1929
 
--spec handshake(binary(), tuple()) -> tuple().
+-spec handshake(binary(), state()) -> tuple().
 handshake(Msg, State) ->
     <<5, NMETHODS, METHODS/binary>> = Msg,
     logger:debug("Worker: Received SOCKS5 handshake message with ~B methods", [NMETHODS]),
@@ -39,7 +39,7 @@ handshake(Msg, State) ->
             {stop, normal, State}
     end.
 
--spec authenticate(binary(), tuple()) -> tuple().
+-spec authenticate(binary(), state()) -> tuple().
 authenticate(Msg, State) ->
     % +----+------+----------+------+----------+
     % |VER | ULEN |  UNAME   | PLEN |  PASSWD  |
@@ -69,7 +69,7 @@ authenticate(Msg, State) ->
             {stop, normal, State}
     end.
 
--spec negotiate(binary(), tuple()) -> tuple().
+-spec negotiate(binary(), state()) -> tuple().
 negotiate(Msg, State) ->
     <<_VER, CMD, ?RSV, ATYP, Rest/binary>> = Msg,
 
@@ -260,7 +260,7 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
 % relay data in UDP ASSOCIATE
 % UDP port receives data with header
 % UDP port receives data without header
--spec udp_associate_relay(tuple(), tuple()) -> tuple().
+-spec udp_associate_relay(tuple(), state()) -> tuple().
 udp_associate_relay({udp, Socket, IP, InPortNo, Msg}, State) ->
 
     ok = inet:setopts(Socket, [{active, once}]),

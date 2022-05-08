@@ -11,7 +11,6 @@ Build
 
 TODO
 -----
-- spec
 - type
 - improve logging
 - per-user ACL?

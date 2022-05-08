@@ -1,3 +1,5 @@
+-export_type([stage/0, state/0]).
+
 -record(stage,{
     handshake, % nothing exchanged yet - do handshake
     authenticate, % handshake done and auth required - do authentication
@@ -5,4 +7,16 @@
     connect, % CONNECT or BIND in place and connected - relay TCP traffic
     udp_associate % UDP ASSOCIATE in place - relay UDP traffic
 }).
--record(state, {supervisor, socket, connectSocket, connectSocketIpv6, stage = #stage.handshake, udpClientIP, udpClientPort}).
+
+-record(state, {
+    supervisor :: pid() | undefined,
+    socket :: inet:socket() | undefined,
+    connectSocket :: inet:socket() | undefined,
+    connectSocketIpv6 :: inet:socket() | undefined,
+    stage = #stage.handshake,
+    udpClientIP :: tuple() | undefined,
+    udpClientPort :: integer() | undefined
+    }).
+
+-type stage() :: #stage{}.
+-type state() :: #state{}.
