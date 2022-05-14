@@ -1,0 +1,22 @@
+[
+  {esocksd, 
+   [
+        {listenaddress, ["0.0.0.0", "::"]}, 
+        {port, [${PORT:-1080}]}, 
+        {loglevel, ${LOGLEVEL:-notice}}, 
+        {logfile, "${LOGFILE:-esocksd.log}"}, 
+        {authmethod, ${AUTHMETHOD:-none}},
+        {allowcommands, [connect, bind, udp_associate]},
+        {networkacl, [
+            {allow, "0.0.0.0/0"},
+            {block, "255.255.255.255/31"}
+        ]},
+        {networkacl6, [
+            {allow, "::/0"}
+        ]},
+        {userpass, [
+            {"username", "password"},
+            {"admin", "secret"}
+        ]}
+   ]}
+].
