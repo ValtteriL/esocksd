@@ -82,12 +82,12 @@ The configuration looks as follows:
 
 ### listenaddress
 Specifies the local addresses esocksd should listen on.
-Specified as a list of strings. Example: `["0.0.0.0", "::"]`
+Specified as a list of strings. Example: `["0.0.0.0", "::"]`.
 The default is to listen on all local addresses.
 
 ### port
 Specifies the port number that esocksd listens on. 
-Specified as a list of strings. Example: `[1080, 1081]`
+Specified as a list of strings. Example: `[1080, 1081]`.
 The default is `[1080]`.
 
 Can be overwritten with environment variable PORT. Example: `PORT=1080 esocksd`.
@@ -103,7 +103,7 @@ Can be overwritten with environment variable LOGLEVEL. Example: `LOGLEVEL=debug 
 File to write log output to. Specified as a string.
 Example: `esocksd.log`.
 
-Can be overwritten with environment variable LOGFILE. Example: `LOGFILE=/dev/null esocksd`
+Can be overwritten with environment variable LOGFILE. Example: `LOGFILE=/dev/null esocksd`.
 
 ### authmethod
 Authentication method used. The possible values are:
@@ -112,7 +112,7 @@ none = no authentication required
 userpass = username + password authentcation required (disables SOCKS4 as it does not support authentication)
 The default is `none`.
 
-Can be overwritten with environment variable AUTHMETHOD. Example: `AUTHMETHOD=userpass esocksd`
+Can be overwritten with environment variable AUTHMETHOD. Example: `AUTHMETHOD=userpass esocksd`.
 
 ### allowcommands
 SOCKS commands that are allowed. The possible values are: 
@@ -128,7 +128,7 @@ The default is to allow all networks except localhost.
 
 ### networkacl6
 Same as networkacl but for IPv6.
-Example: `[{allow, "::/0"}]`
+Example: `[{allow, "::/0"}]`.
 The default is to allow all networks except localhost.
 
 ### userpass
