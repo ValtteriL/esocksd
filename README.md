@@ -21,7 +21,7 @@ Features
 Install
 -----
 
-    $ mkdir esocksd && cd esockds
+    $ mkdir esocksd && cd esocksd
     $ wget https://github.com/ValtteriL/esocksd/releases/download/1.0.0/esocksd-1.0.0.tar.gz
     $ tar -zxvf esocksd-1.0.0.tar.gz
     $ export PATH=$PATH:$PWD/bin
