@@ -14,9 +14,6 @@
         {networkacl6, [
             {allow, "::/0"}
         ]},
-        {userpass, [
-            {"username", "password"},
-            {"admin", "secret"}
-        ]}
+        {userpass, []}
    ]}
 ].
