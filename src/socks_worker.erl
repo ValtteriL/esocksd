@@ -5,6 +5,7 @@
 
 -export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
+-export([log_debug/2, log_info/2, log_notice/2, log_warning/2]).
 
 
 start_link(Supervisor, Socket) ->
@@ -12,17 +13,21 @@ start_link(Supervisor, Socket) ->
 
 init([Supervisor, Socket]) ->
     gen_server:cast(self(), accept),
-    {ok, #state{supervisor=Supervisor, socket=Socket}}.
+    WorkerId = erlang:unique_integer([positive]),
+    {ok, #state{workerId=WorkerId, supervisor=Supervisor, socket=Socket}}.
 
 % handle start message from self
 handle_cast(accept, State) ->
 
     % accept new connection
     {ok, AcceptSocket} = gen_tcp:accept(State#state.socket),
-    logger:debug("Worker: Accepted connection"),
+
+    {ok, {Ip, Port}} = inet:peername(AcceptSocket),
+    NoticeMsg = io_lib:format("Accepted connection from ~s:~B", [inet:ntoa(Ip), Port]),
+    log_notice(State#state.workerId, NoticeMsg),
 
     esocksd_sup:start_socket(State#state.supervisor), % start a new listener to replace this one
-    {noreply, #state{socket=AcceptSocket }};
+    {noreply, State#state{socket=AcceptSocket }};
 
 handle_cast(_, State) ->
     {noreply, State}.
@@ -32,7 +37,7 @@ handle_cast(_, State) ->
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
-    logger:debug("Worker: Entered negotiation"),
+    log_debug(State#state.workerId, "Entered negotiation"),
 
     <<VER, _/binary>> = Msg,
 
@@ -44,11 +49,11 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.handshake}) ->
             {stop, normal, State};
         {4, false} ->
             % SOCKS4
-            logger:debug("Worker: SOCKS4 chosen"),
+            log_debug(State#state.workerId, "SOCKS4 chosen"),
             socks4:negotiate(Msg, State); % SOCKS4 does not include handshake - go directly to negotiation
         {5, _} ->
             % SOCKS5
-            logger:debug("Worker: SOCKS5 chosen"),
+            log_debug(State#state.workerId, "SOCKS5 chosen"),
             socks5:handshake(Msg, State)
     end;
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.authenticate}) ->
@@ -59,12 +64,12 @@ handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.request}) ->
     socks5:negotiate(Msg, State);
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, socket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
-    logger:debug("Worker (in CONNECT): passing TCP data from client to destination"),
+    log_debug(State#state.workerId, "Passing TCP data from client to destination"),
     gen_tcp:send(State#state.connectSocket, Msg),
     {noreply, State};
 handle_info({tcp, Socket, Msg}, State=#state{stage=#stage.connect, connectSocket=Socket}) ->
     ok = inet:setopts(Socket, [{active, once}]),
-    logger:debug("Worker (in CONNECT): passing TCP data from destination to client"),
+    log_debug(State#state.workerId, "Passing TCP data from destination to client"),
     gen_tcp:send(State#state.socket, Msg),
     {noreply, State};
 handle_info({tcp_closed, _Socket}, State) -> {stop, normal, State};
@@ -74,7 +79,8 @@ handle_info(Message = {udp, _Socket, _IP, _InPortNo, _Msg}, State=#state{stage=#
     socks5:udp_associate_relay(Message, State);
 
 handle_info(E, State) ->
-    logger:warning("UNEXPECTED: ~p", [E]),
+    ErrMsg = io_lib:format("UNEXPECTED: ~p", [E]),
+    log_warning(State#state.workerId, ErrMsg),
     {noreply, State}.
 
 handle_call(_E, _From, State) -> {noreply, State}.
@@ -84,3 +90,11 @@ code_change(_OldVersion, Tab, _Extra) -> {ok, Tab}.
 
 %%% helpers
 
+log_debug(WorkerId, Message) ->
+    logger:debug("Worker ~B: ~s", [WorkerId, lists:flatten(Message)]).
+log_info(WorkerId, Message) ->
+    logger:info("Worker ~B: ~s", [WorkerId, lists:flatten(Message)]).
+log_notice(WorkerId, Message) ->
+    logger:notice("Worker ~B: ~s", [WorkerId, lists:flatten(Message)]).
+log_warning(WorkerId, Message) ->
+    logger:warning("Worker ~B: ~s", [WorkerId, lists:flatten(Message)]).

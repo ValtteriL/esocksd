@@ -24,9 +24,12 @@ negotiate(Msg, State) ->
     DST_ADDR = case DSTIP of
         <<0,0,0,X>> ->
             % SOCKS4A request
-            logger:debug("Worker: SOCKS4A domain received"),
             false = (X == 0),
             [_, Domain, _] = binary:split(Rest, <<0>>, [global]),
+
+            NoticeMsg = io_lib:format("Domain used as DST (~s)", [Domain]),
+            socks_worker:log_notice(State#state.workerId, NoticeMsg),
+            
             Addr = helpers:resolve(binary_to_list(Domain)), % resolve name to ipv4 address
             Addr;
         _->
@@ -38,10 +41,10 @@ negotiate(Msg, State) ->
 
     Command = case CD of
         ?CD_CONNECT ->
-            logger:debug("Worker: SOCKS4 CONNECT request received"),
+            socks_worker:log_debug(State#state.workerId, "SOCKS4 CONNECT request received"),
             connect;
         ?CD_BIND ->
-            logger:debug("Worker: SOCKS4 BIND request received"),
+            socks_worker:log_debug(State#state.workerId, "SOCKS4 BIND request received"),
             bind
     end,
 
@@ -50,11 +53,11 @@ negotiate(Msg, State) ->
         {bind, true, true} -> bind(DST_ADDR, State);
         {_, CmdAllowed, AddrAllowed} -> 
             case CmdAllowed of
-                false -> logger:notice("Worker: SOCKS4 command not allowed");
+                false -> socks_worker:log_warning(State#state.workerId, "SOCKS4 command not allowed");
                 _ -> ok
             end,
             case AddrAllowed of
-                false -> logger:notice("Worker: destination address not allowed");
+                false -> socks_worker:log_warning(State#state.workerId, "Destination address not allowed");
                 _ -> ok
             end,
             gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),
@@ -70,9 +73,15 @@ negotiate(Msg, State) ->
 % stores the socket to connectSocket in state
 % then relay traffic between socket and connectSocket
 connect(DST_ADDR, DST_PORT, State) ->
+
+    DbgMsg = io_lib:format("Connecting to ~s:~B", [inet:ntoa(DST_ADDR), DST_PORT]),
+    socks_worker:log_debug(State#state.workerId, DbgMsg),
+
     case gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
         {ok, ConnectSocket} ->
-            logger:debug("Worker (in CONNECT 4): Connection established to remote host!"),
+
+            NoticeMsg = io_lib:format("Connected to ~s:~B", [inet:ntoa(DST_ADDR), DST_PORT]),
+            socks_worker:log_notice(State#state.workerId, NoticeMsg),
             
             % communicate the bound hostname and port
             PortBytes = helpers:integer_to_2byte_binary(DST_PORT),
@@ -85,7 +94,8 @@ connect(DST_ADDR, DST_PORT, State) ->
             
             {noreply, State#state{stage=#stage.connect, connectSocket=ConnectSocket}};
         {error, Reason} ->
-            logger:debug("Worker (in CONNECT 4): failed to connect to remote host: ~p", [Reason]),
+            ErrMsg = io_lib:format("Failed to connect to remote host: ~p", [Reason]),
+            socks_worker:log_warning(State#state.workerId, ErrMsg),
             gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, DST_PORT/binary, DST_ADDR/binary>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
@@ -100,7 +110,8 @@ bind(DST_ADDR, State) ->
     {ok, ListenSocket} = gen_tcp:listen(0, []),
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
 
-    logger:debug("Worker (in BIND 4): Listening for connections on port ~B...~n", [Port]),
+    StateMsg = io_lib:format("Listening for connections on port ~B...", [Port]),
+    socks_worker:log_info(State#state.workerId, StateMsg),
 
     PortBytes = helpers:integer_to_2byte_binary(Port),
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),
@@ -120,7 +131,8 @@ bind(DST_ADDR, State) ->
             RemoteAddrBytes = helpers:addr_to_bytes(RemoteAddr),
             RemotePortBytes = helpers:integer_to_2byte_binary(RemotePort),
 
-            logger:info("Worker (in BIND 4): Connection received from ~p:~B!", [RemoteAddr, RemotePort]),
+            ConnStateMsg = io_lib:format("Connection received to BIND from ~s:~B", [inet:ntoa(RemoteAddr), RemotePort]),
+            socks_worker:log_notice(State#state.workerId, ConnStateMsg),
 
             % The SOCKS server checks the IP address of the originating host against
             % the value of DSTIP specified in the client's BIND request.  If a mismatch
@@ -135,7 +147,7 @@ bind(DST_ADDR, State) ->
                 DST_ADDR ->
                     gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_GRANTED, RemotePortBytes/binary, RemoteAddrBytes/binary>>);
                 _ ->
-                    logger:debug("Worker (in BIND 4): Connection received from wrong host"),
+                    socks_worker:log_warning(State#state.workerId, "Connection received from wrong host"),
                     gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, RemotePortBytes/binary, RemoteAddrBytes/binary>>),
                     gen_tcp:shutdown(State#state.socket, write),
                     gen_tcp:close(ListenSocket)
@@ -144,7 +156,7 @@ bind(DST_ADDR, State) ->
             {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
         {error, _} ->
 
-            logger:info("Worker (in BIND 4): Error accepting connection"),
+            socks_worker:log_warning(State#state.workerId, "Error accepting connection"),
 
             % communicate error
             gen_tcp:send(State#state.socket, <<?REP_VERSION, ?REQ_REJECTED_OR_FAILED, 0,0,0,0, 0,0>>),

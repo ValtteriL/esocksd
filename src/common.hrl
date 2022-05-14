@@ -9,6 +9,7 @@
 }).
 
 -record(state, {
+    workerId :: integer() | undefined,
     supervisor :: pid() | undefined,
     socket :: inet:socket() | undefined,
     connectSocket :: inet:socket() | undefined,

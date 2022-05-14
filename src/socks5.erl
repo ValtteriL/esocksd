@@ -12,7 +12,9 @@
 -spec handshake(binary(), state()) -> tuple().
 handshake(Msg, State) ->
     <<5, NMETHODS, METHODS/binary>> = Msg,
-    logger:debug("Worker: Received SOCKS5 handshake message with ~B methods", [NMETHODS]),
+
+    DbgMsg = io_lib:format("Received SOCKS5 handshake message with ~B methods", [NMETHODS]),
+    socks_worker:log_debug(State#state.workerId, DbgMsg),
 
     ListMETHODS = binary:bin_to_list(METHODS),
 
@@ -23,17 +25,17 @@ handshake(Msg, State) ->
     case {config:auth_required(), UserPassProposed, NoAuthProposed } of
         {true, true, _} ->
             % choose M_USERPASS method, and move to authentication stage
-            logger:debug("Worker: Supported SOCKS version and method found (userpass)"),
+            socks_worker:log_debug(State#state.workerId, "Choosing userpass"),
             gen_tcp:send(State#state.socket, <<5, ?M_USERPASS>>),
             {noreply, State#state{stage=#stage.authenticate}};
         {false, _, true} ->
             % choose M_NOAUTH method, and move to next stage
-            logger:debug("Worker: Supported SOCKS version and method found (noauth)"),
+            socks_worker:log_debug(State#state.workerId, "Choosing noauth"),
             gen_tcp:send(State#state.socket, <<5, ?M_NOAUTH>>),
             {noreply, State#state{stage=#stage.request}};
         _ -> 
             % reply no, end connection, and terminate worker
-            logger:info("Worker: Unsupported auth method proposed"),
+            socks_worker:log_info(State#state.workerId, "No supported auth method found"),
             gen_tcp:send(State#state.socket, <<5, ?M_NOTAVAILABLE>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
@@ -59,11 +61,13 @@ authenticate(Msg, State) ->
     case config:auth_credentials_correct(Username, Password) of
         true ->
             % valid creds: continue to request state
+            StatusMsg = io_lib:format("Userpass authentication successful with username \"~s\"", [Username]),
+            socks_worker:log_notice(State#state.workerId, StatusMsg),
             gen_tcp:send(State#state.socket, <<1, ?USERPASS_STATUS_SUCCESS>>),
             {noreply, State#state{stage=#stage.request}};
         _ ->
             % invalid creds: end connection and terminate worker
-            logger:info("Worker: Invalid credentials"),
+            socks_worker:log_warning(State#state.workerId, "Userpass authentication failed (invalid credentials)"),
             gen_tcp:send(State#state.socket, <<1, ?USERPASS_STATUS_FAILURE>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
@@ -79,28 +83,33 @@ negotiate(Msg, State) ->
             {helpers:bytes_to_addr(DST), binary:decode_unsigned(T)};
         ?ATYP_DOMAINNAME ->
             <<DOMAIN_LEN, DST_HOST:DOMAIN_LEN/binary, T/binary>> = Rest,
+
+            NoticeMsg = io_lib:format("Domain used as DST (~s)", [DST_HOST]),
+            socks_worker:log_notice(State#state.workerId, NoticeMsg),
+
             DST = helpers:resolve(binary_to_list(DST_HOST)),
             {DST, binary:decode_unsigned(T)};
         ?ATYP_IPV6 ->
             <<DST:16/binary, T/binary>> = Rest,
             {helpers:bytes_to_addr(DST), binary:decode_unsigned(T)};
         _ ->
-            logger:info("Worker: Unsupported ATYP reveived"),
+            socks_worker:log_warning(State#state.workerId, "Unsupported ATYP reveived"),
             gen_tcp:send(State#state.socket, <<5, ?REP_ATYPE_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write)
     end,
 
-    logger:debug("Worker: Received SOCKS request CMD: ~B, ATYP: ~B, DST_ADDR: ~p, DST_PORT: ~B~n", [CMD, ATYP, DST_ADDR, DST_PORT]),
+    DbgMsg = io_lib:format("Received SOCKS request CMD: ~B, ATYP: ~B, DST_ADDR: ~s, DST_PORT: ~B", [CMD, ATYP, inet:ntoa(DST_ADDR), DST_PORT]),
+    socks_worker:log_debug(State#state.workerId, DbgMsg),
 
     Command = case CMD of
         ?CMD_CONNECT ->
-            logger:debug("Worker: CONNECT request received"), 
+            socks_worker:log_debug(State#state.workerId, "CONNECT request received"),
             connect;
         ?CMD_BIND ->
-            logger:debug("Worker: BIND request received"), 
+            socks_worker:log_debug(State#state.workerId, "BIND request received"),
             bind;
         ?CMD_UDP_ASSOCIATE ->
-            logger:debug("Worker: UDP ASSOCIATE request received"), 
+            socks_worker:log_debug(State#state.workerId, "UDP ASSOCIATE request received"),
             udp_associate
     end,
 
@@ -127,7 +136,7 @@ negotiate(Msg, State) ->
                 false -> close_network_disallowed(State)
             end; 
         {_, false} ->
-            logger:info("Worker: Command not allowed"),
+            socks_worker:log_warning(State#state.workerId, "Command not allowed"),
             gen_tcp:send(State#state.socket, <<5, ?REP_CMD_NOT_SUPPORTED, ?RSV, ?REP_PADDING/binary>>),
             gen_tcp:shutdown(State#state.socket, write),
             {stop, normal, State}
@@ -139,9 +148,15 @@ negotiate(Msg, State) ->
 % stores the socket to connectSocket in state
 % then relay traffic between socket and connectSocket
 connect(DST_ADDR, DST_PORT, State) ->
+
+    DbgMsg = io_lib:format("Connecting to ~s:~B", [inet:ntoa(DST_ADDR), DST_PORT]),
+    socks_worker:log_debug(State#state.workerId, DbgMsg),
+
     case  gen_tcp:connect(DST_ADDR, DST_PORT, [], 5000) of
         {ok, Socket} ->
-            logger:debug("Worker (in CONNECT): Connection established to remote host!"),
+
+            NoticeMsg = io_lib:format("Connected to ~s:~B", [inet:ntoa(DST_ADDR), DST_PORT]),
+            socks_worker:log_notice(State#state.workerId, NoticeMsg),
 
             {ok, {IfAddr, Port}} = inet:sockname(Socket),
             PortBytes = helpers:integer_to_2byte_binary(Port),
@@ -155,6 +170,10 @@ connect(DST_ADDR, DST_PORT, State) ->
             
             {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
         {error, Reason} ->
+
+            ErrMsg = io_lib:format("Failed to connect to remote host: ~p", [Reason]),
+            socks_worker:log_warning(State#state.workerId, ErrMsg),
+
             case Reason of
                 enetunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_NETWORK_UNREACHABLE, ?RSV, ?REP_PADDING/binary>>);
                 ehostunreach -> gen_tcp:send(State#state.socket, <<5, ?REP_HOST_UNREACHABLE, ?RSV, ?REP_PADDING/binary>>);
@@ -174,7 +193,8 @@ bind(State) ->
     {ok, ListenSocket} = gen_tcp:listen(0, []),
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocket),
 
-    logger:debug("Worker (in BIND): Listening for connections on port ~B...~n", [Port]),
+    DbgMsg = io_lib:format("Listening for connections on port ~B...", [Port]),
+    socks_worker:log_info(State#state.workerId, DbgMsg),
 
     PortBytes = helpers:integer_to_2byte_binary(Port),
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),
@@ -194,7 +214,8 @@ bind(State) ->
             RemoteAddrBytes = helpers:addr_to_bytes(RemoteAddr),
             RemotePortBytes = helpers:integer_to_2byte_binary(RemotePort),
 
-            logger:info("Worker: Connection received from ~p:~B!", [RemoteAddr, RemotePort]),
+            StatusMsg = io_lib:format("Connection received to BIND from ~s:~B", [inet:ntoa(RemoteAddr), RemotePort]),
+            socks_worker:log_notice(State#state.workerId, StatusMsg),
 
             case config:address_allowed(RemoteAddr) of
                 true ->
@@ -203,7 +224,10 @@ bind(State) ->
                     {noreply, State#state{stage=#stage.connect, connectSocket=Socket}};
                 false -> 
                     % received connection from disallowed host - communicate error
-                    logger:info("Worker (in BIND): Accepted connection from disallowed host"),
+                    
+                    WarnMsg = io_lib:format("Accepted connection from disallowed host (~s:~B)", [inet:ntoa(RemoteAddr), RemotePort]),
+                    socks_worker:log_warning(State#state.workerId, WarnMsg),
+
                     gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV, ?REP_PADDING/binary>>),
                     gen_tcp:shutdown(State#state.socket, write),
                     gen_tcp:close(ListenSocket),
@@ -212,7 +236,7 @@ bind(State) ->
             end;
         {error, _} ->
 
-            logger:info("Worker (in BIND): Error accepting connection"),
+            socks_worker:log_warning(State#state.workerId, "Error accepting connection"),
 
             % communicate error
             gen_tcp:send(State#state.socket, <<5, ?REP_GEN_FAILURE, ?RSV, ?REP_PADDING/binary>>),
@@ -235,7 +259,8 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
     
     {ok, {IfAddr, Port}} = inet:sockname(ListenSocketIpv4),
 
-    logger:info("Worker (in UDP ASSOCIATE): Listening for UDP connections on ~p, port ~B", [IfAddr,Port]),
+    StatusMsg = io_lib:format("Listening for UDP connections on ~s, port ~B", [inet:ntoa(IfAddr), Port]),
+    socks_worker:log_info(State#state.workerId, StatusMsg),
 
     PortBytes = helpers:integer_to_2byte_binary(Port),
     IfAddrBytes = helpers:addr_to_bytes(IfAddr),
@@ -264,27 +289,34 @@ udp_associate(DST_ADDR, DST_PORT, State) ->
 udp_associate_relay({udp, Socket, IP, InPortNo, Msg}, State) ->
 
     ok = inet:setopts(Socket, [{active, once}]),
-    logger:debug("Worker (in UDP ASSOCIATE): passing UDP data"),
+    socks_worker:log_debug(State#state.workerId, "Passing UDP data"),
 
     % expect encapsulated traffic from client
     case ((IP == State#state.udpClientIP) and ((InPortNo == State#state.udpClientPort) or (State#state.udpClientPort==undefined))) of
         true ->
-            logger:debug("Worker (in UDP ASSOCIATE): client sends UDP traffic to DST"),
+            socks_worker:log_debug(State#state.workerId, "Client sends UDP traffic to DST"),
             % client sent this (store the Port)
             <<?RSV, ?RSV, ?UDP_FRAG,  ATYP, Rest/binary>> = Msg,
             {DST_ADDR, DST_PORT, Data} = case ATYP of
                 ?ATYP_IPV4 ->
                     <<DST:4/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {helpers:bytes_to_addr(DST), T, Datagram};
+                    DstAddr = helpers:bytes_to_addr(DST),
+                    InfoMsg = io_lib:format("Client sends UDP traffic to ~s:~B", [inet:ntoa(DstAddr), binary:decode_unsigned(T)]),
+                    {DstAddr, T, Datagram};
                 ?ATYP_DOMAINNAME ->
                     <<DOMAIN_LEN, T1/binary>> = Rest,
                     <<DST_HOST:DOMAIN_LEN/binary, T:2/binary, Datagram/binary>> = T1,
                     DST = binary_to_list(DST_HOST),
+                    InfoMsg = io_lib:format("Client sends UDP traffic to ~s:~B", [DST,binary:decode_unsigned(T)]),
                     {helpers:resolve(DST), T, Datagram};
                 ?ATYP_IPV6 ->
                     <<DST:16/binary, T:2/binary, Datagram/binary>> = Rest,
-                    {helpers:bytes_to_addr(DST), T, Datagram}
+                    DstAddr = helpers:bytes_to_addr(DST),
+                    InfoMsg = io_lib:format("Client sends UDP traffic to ~s:~B", [inet:ntoa(DstAddr), binary:decode_unsigned(T)]),
+                    {DstAddr, T, Datagram}
             end,
+
+            socks_worker:log_info(State#state.workerId, InfoMsg),
 
             % relay Data to the destination if address allowed
             % otherwise drop
@@ -295,19 +327,22 @@ udp_associate_relay({udp, Socket, IP, InPortNo, Msg}, State) ->
                 {true, _} -> 
                     ok = gen_udp:send(State#state.connectSocket, DST_ADDR, binary:decode_unsigned(DST_PORT), Data);
                 {false, _} -> 
-                    logger:notice("Worker (in UDP ASSOCIATE): dropping traffic destined to disallowed address")
+                    socks_worker:log_warning(State#state.workerId, "Dropping traffic destined to disallowed address")
             end,
 
             {noreply, State#state{udpClientPort=InPortNo}};
         _->
 
-            logger:debug("Worker (in UDP ASSOCIATE): DST sends UDP traffic to client"),
+            socks_worker:log_debug(State#state.workerId, "DST sends UDP traffic to client"),
             
             % this is reply from the destination host
             
             case config:address_allowed(IP) of
                 true -> 
                     % prepend header and send to client
+
+                    InfoMsg = io_lib:format("DST (~s:~B) sends UDP traffic to client", [inet:ntoa(IP), InPortNo]),
+                    socks_worker:log_info(State#state.workerId, InfoMsg),
             
                     RemoteAddrBytes = helpers:addr_to_bytes(IP),
                     RemotePortBytes = helpers:integer_to_2byte_binary(InPortNo),
@@ -325,7 +360,7 @@ udp_associate_relay({udp, Socket, IP, InPortNo, Msg}, State) ->
                         _ ->
                             ok = gen_udp:send(State#state.connectSocketIpv6, State#state.udpClientIP, State#state.udpClientPort, Data)
                     end;
-                false -> logger:notice("Worker (in UDP ASSOCIATE): dropping traffic from disallowed address")
+                false -> socks_worker:log_warning(State#state.workerId, "Dropping traffic from disallowed address")
             end,
 
             {noreply, State}
@@ -336,7 +371,7 @@ udp_associate_relay({udp, Socket, IP, InPortNo, Msg}, State) ->
 
 % close connection cleanly
 close_network_disallowed(State) ->
-    logger:info("Worker: Network not allowed"),
+    socks_worker:log_warning(State#state.workerId, "Network not allowed"),
     gen_tcp:send(State#state.socket, <<5, ?REP_CONNECTION_NOT_ALLOWED, ?RSV, ?REP_PADDING/binary>>),
     gen_tcp:shutdown(State#state.socket, write),
     gen_tcp:close(State#state.socket),
