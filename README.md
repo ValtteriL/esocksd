@@ -5,6 +5,8 @@ esocksd is a robust SOCKS proxy server daemon.
 
 As an OTP application, esocksd is aimed for serving LARGE number of clients.
 
+[![asciicast](https://asciinema.org/a/mf11mGQKSobl7TGe7LvD0CBO2.svg)](https://asciinema.org/a/mf11mGQKSobl7TGe7LvD0CBO2)
+
 
 Features
 -----
