@@ -17,6 +17,7 @@ start_link() ->
 
 init([]) ->
     config:load(),
+    logger:notice("### Starting esocksd ###"),
     ListenAddresses = config:listen_addresses(),
 
     % start supervisor for each listenaddress
