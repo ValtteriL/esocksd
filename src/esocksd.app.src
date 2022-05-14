@@ -1,7 +1,7 @@
 {application, esocksd,
  [{description, "SOCKS proxy daemon"},
-  {vsn, "0.1.0"},
-  {registered, []},
+  {vsn, "1"},
+  %{registered, []},
   {mod, {esocksd_app, []}},
   {applications,
    [kernel,
@@ -26,8 +26,8 @@
             {"admin", "secret"}
         ]}
     ]},
-  {modules, []},
+  %{modules, []},
 
-  {licenses, ["Apache 2.0"]},
-  {links, []}
+  {licenses, ["Apache 2.0"]}%,
+  %{links, []}
  ]}.
